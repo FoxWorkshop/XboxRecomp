@@ -1,3 +1,6 @@
+#pragma once
+#include "x86_config.h"
+
 #ifndef X86_CONTEXT_H_INCLUDED
 #define X86_CONTEXT_H_INCLUDED
 
@@ -12,8 +15,14 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <immintrin.h> //SSE/AVX intrinsics
-
+//#include <immintrin.h> //SSE/AVX intrinsics
+#include <x86intrin.h>
+#ifdef _WIN32
+#include <intrin.h>
+#else
+#include <xmmintrin.h>
+#include <smmintrin.h>
+#endif
 
 #define X86_JOIN(x, y) x##y
 #define X86_XSTRINGIFY(x) #x
@@ -59,7 +68,7 @@
 #endif
 
 
-typedef void X86Func(struct X86Context& __restrict ctx, uint8_t* base);
+typedef void X86Func(struct X86Context& __restrict__ ctx, uint8_t* base);
 
 struct X86FuncMapping
 {

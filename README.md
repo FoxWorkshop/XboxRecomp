@@ -88,6 +88,8 @@ XboxRecomp [input TOML file path] [input X86 context header file path]
 
 [An example recompiler TOML file can be viewed in the Shadow Recompiled repository.](https://github.com/FoxWorkshop/ShadowRecomp/raw/refs/heads/master/ShadowRecompLib/config/recompConfig.toml)
 
+If you don't execute the program through command line, it will look for "jumpTable.toml" and "recompConfig.toml in the same folder than XboxRecomp.exe.
+
 #### Main
 
 ```toml
