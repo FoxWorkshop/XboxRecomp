@@ -2939,7 +2939,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
     {
         println("#include \"x86_recomp_shared.h\"\n");
 
-        println("X86FuncMapping X86FuncMapping[] = {{");
+        println("X86FuncMapping X86FuncMappings[] = {{");
         for (auto& symbol : image.symbols)
             println("\t{{ 0x{:X}, {} }},", symbol.address, symbol.name);
 
