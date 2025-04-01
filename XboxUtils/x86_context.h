@@ -1,9 +1,3 @@
-#pragma once
-#include "x86_config.h"
-
-#pragma once
-#include "x86_config.h"
-
 #ifndef X86_CONTEXT_H_INCLUDED
 #define X86_CONTEXT_H_INCLUDED
 
