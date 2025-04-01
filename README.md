@@ -1,0 +1,184 @@
+# XboxRecomp
+
+XboxRecomp is a tool that converts Xbox executables (xbe file) into C++ code, which can then be recompiled for any platform. Currently, it only supports x86 platforms due to the use of x86 intrinsics.
+
+This project was built (and therefore inspired) from [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), most PPC logic was rewritten for x86. (Sometimes in a questionable way as assembly isn't my expertise.).
+
+## Implementation Details
+
+### Instructions
+
+Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it might be possible to bypass this and just call the functions directly from the original XBE file, I think it's still cleaner to rebuild the functions from scratch, it was also a nice learning experience, though obviously the output is not very human-readable. 
+
+Having a translation process can also help a future implementation of other CPU language, such as Arm for potential Switch version, which won't be possible if we just call functions from the XBE file.
+
+The instruction implementations operate on little-endian values, which is what the original Xbox use.
+
+
+### Indirect / Virtual Functions
+
+Virtual function calls are resolved by creating a "perfect hash table" at runtime, where dereferencing a 64-bit pointer (using the original instruction address multiplied by 2) gives the address of the recompiled function. It relies on function addresses being placed after the valid XBE memory region in the base memory pointer. These regions are exported as macros in the output `x86_config.h` file.
+
+### Global Variables
+
+Global variables are not recompiled, instead, when the recompilated game needs to access them, it will browse them in the reserved memory region that contains all the XBE data.
+
+### Jump Tables
+
+Jump tables often have predictable assembly patterns, making them easy to detect statically. XboxAnalyse has logic for detecting jump tables (at least in Shadow The Hedgehog) but it's not perfect, a few are still missed so it's up to the user to manually extract them through ida / ghidra.
+Variations in other games may also require modifications to the detection logic. 
+
+XboxAnalyse generates a TOML file containing detected jump tables, which can be referenced in the main TOML config file. This allows the recompiler to generate real switch cases for these jump tables.
+
+### Indirect Jump Tables
+
+Indirect jump tables are resolved in the same way than indirect functions, since all functions get mapped into a "host to guest" array, they will be resolved on runtime on the recompiled game as long as the code for it is implemented.
+
+### Function Boundary Analysis
+
+XboxAnalyse includes a function boundary analyzer that works in most cases, but is very far from perfect.
+
+Currently, many functions are missed during analyse mostly because XBE file has many segments that contain functions that don't always follow the regular rules than .text use. (e.g 16 bytes pattern, predictable start address etc.).
+
+Do not expect to get all your functions extracted and analysed, some will need manual size fix and others will need full manual implementation (e.g start address and size). You can add the missing functions in the TOML file before running XboxRecomp.
+
+### Exceptions
+
+XBE File contains SEH functions which handle exceptions, those functions are usually assigned in a reguler game function with a consistent pattern (e.g push 0x0FFFFFFFF -> push offset seh_XXXXXX).
+
+Sometimes, functions that assign SEH function has orphan blocks, meaning it has block code that is only supposed to be read if the code fail and the exception runs.
+While it's rare, those functions might fail in recompilation, they might need manual handle.
+
+
+### Patch Mechanisms
+
+XboxRecomp defines X86 functions in a way that makes them easy to hook, using techniques in the Clang compiler. By aliasing a X86 function to an "implementation function" and marking the original function as weakly linked, users can override it with a custom implementation while retaining access to the original function:
+
+```cpp
+X86_FUNC_IMPL(__imp__sub_XXXXXXXX);
+X86_FUNC(sub_XXXXXXXX)
+{
+    __imp__sub_XXXXXXXX(ctx, base);
+}
+```
+
+Additionally, mid-asm hooks can be inserted directly into the translated C++ code at specific instruction addresses. The recompiler inserts these function calls, and users are responsible for implementing them in their recompilation project. The linker resolves them during compilation.
+
+## Usage
+
+### XboxAnalyse
+
+XboxAnalyse, when used as a command-line application, allows an XBE file to be passed as an input argument to output a TOML file containing all the detected jump tables in the executable:
+
+```
+XboxAnalyse [input XBE file path] [output jump table TOML file path]
+```
+
+However, as explained in the earlier sections, due to variations between games, additional support may be needed to handle different patterns.
+
+[An example jump table TOML file can be viewed in the Shadow Recompiled repository.](https://github.com/FoxWorkshop/ShadowRecomp/raw/refs/heads/master/ShadowRecompLib/config/jumpTables.toml) 
+
+### XboxRecomp
+
+XboxRecomp accepts a TOML file with recompiler configurations and the path to the `x86_context.h` file located in the XboxUtils directory:
+
+```
+XboxRecomp [input TOML file path] [input X86 context header file path]
+```
+
+[An example recompiler TOML file can be viewed in the Shadow Recompiled repository.](https://github.com/FoxWorkshop/ShadowRecomp/raw/refs/heads/master/ShadowRecompLib/config/recompConfig.toml)
+
+#### Main
+
+```toml
+[main]
+file_path = "default.xbe"
+out_directory_path = "../extracted"
+switch_table_file_path = "out.toml"
+```
+
+All the paths are relative to the directory where the TOML file is stored.
+
+Property|Description
+-|-
+file_path|Path to the XBE file.
+out_directory_path|Path to the directory that will contain the output C++ code. This directory must exist before running the recompiler.
+switch_table_file_path|Path to the TOML file containing the jump table definitions. The recompiler uses this file to convert jump tables to real switch cases.
+
+
+#### Explicit Function Boundaries
+
+```toml
+functions = [
+    { address = 0x125B0, size = 0x146 },    
+	{ address = 0x31c720, size = 0x1489 },	
+	{ address = 0x66A80, size = 0x8A },
+]
+```
+
+You can define function boundaries explicitly using the `functions` property if XboxAnalyse fails to analyze them correctly, for example, with functions containing jump tables.
+
+#### Invalid Instruction Skips
+
+```toml
+invalid_instructions = [
+    { data = 0x00000000, size = 4 }, # Padding
+    { data = 0x831B1C90, size = 8 }, # C++ Frame Handler
+    { data = 0x8324B3BC, size = 8 }, # C Specific Frame Handler
+    { data = 0x831C8B50, size = 8 },
+    { data = 0x00485645, size = 44 } # End of .text
+]
+```
+
+In the `invalid_instructions` property, you can define 8-bit integer values that instruct the recompiler to skip over certain bytes when it encounters them.
+
+#### Invalid Addresses Skips
+
+```
+    banned_addresses = [
+    { start = 0x41FF90, end = 0x423B38 }, # variables xgraphics    
+	{ start = 0x37E8FD, end = 0x37E91F }, # jmp table mid function	
+	{ start = 0x37FE7D, end = 0x37FE9F }, # jmp table mid function
+	{ start = 0x37FE03, end = 0x37FE0F }, # jmp table mid function	
+	{ start = 0x37FEEA, end = 0x37FEFB }, # jmp table mid function	
+	{ start = 0x380086, end = 0x380097 }, # jmp table mid function		
+	{ start = 0x37E96A, end = 0x37E97B }, # jmp table mid function		
+	{ start = 0x37EA99, end = 0x37EABB }, # jmp table mid function	
+	{ start = 0x37EB06, end = 0x37EB17 }, # jmp table mid function	
+]
+```
+
+Similar to invalid instruction, `banned_addresses` allow you to skip any instruction between a defined addresses ranges. For example, Shadow Recompiled uses it to skip jmp tables that are literally inside a function which prevent their recompilation to work properly. Making the recompiler skipping that part allows the function to be rebuilt properly.
+
+
+#### Mid-asm Hooks (todo implement)
+
+```toml
+[[midasm_hook]]
+name = "IndexBufferLengthMidAsmHook"
+address = 0x82E26244
+registers = ["ecx"]
+```
+
+```cpp
+void IndexBufferLengthMidAsmHook(X86Register& ecx)
+{
+    // ...
+}
+```
+
+### Tests (may or may not implement)
+
+## Building
+
+The project requires CMake 3.20 or later and Clang 18 or later to build. Since the repository includes submodules, ensure you clone it recursively.
+
+Compilers other than Clang have not been tested and are not recommended, including for recompilation output. The project relies on compiler-specific intrinsics and techniques that may not function correctly on other compilers, and many optimization methods depend on Clang's code generation.
+
+On Windows, you can use the clang-cl toolset and open the project in Visual Studio's CMake integration.
+
+## Special Thanks
+
+- Caustik for [very useful XBE Documentation](https://xbdev.net/fileformats/xbe/NonOfficialXBEFileFormat.pdf).
+- [Sewer56](https://github.com/sewer56) Multiple tips with x86 analyse.
+- [Skyth](https://github.com/blueskythlikesclouds) Provided information of how recompilation overall works which was reproduced here.
