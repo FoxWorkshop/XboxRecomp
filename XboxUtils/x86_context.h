@@ -1,5 +1,3 @@
-#pragma once
-#include "x86_config.h"
 
 #ifndef X86_CONTEXT_H_INCLUDED
 #define X86_CONTEXT_H_INCLUDED
@@ -61,7 +59,7 @@
 
 #define X86_MEMORY_SIZE 0x100000000ull
 
-#define X86_LOOKUP_FUNC(x, y) *(X86Func**)(x + X86_IMAGE_BASE + X86_IMAGE_SIZE + (uint32_t(y) - X86_CODE_BASE) * 2)
+#define X86_LOOKUP_FUNC(x, y) *(X86Func**)(x + X86_IMAGE_BASE + X86_IMAGE_SIZE + (uint64_t(uint32_t(y) - X86_CODE_BASE) * 2))
 
 #ifndef X86_CALL_INDIRECT_FUNC
 #define X86_CALL_INDIRECT_FUNC(x) (X86_LOOKUP_FUNC(base, x))(ctx, base)
@@ -78,7 +76,7 @@ struct X86FuncMapping
 
 extern X86FuncMapping X86FuncMappings[];
 
-struct X86Register 
+struct X86Register
 {
     union {
         struct {
@@ -130,7 +128,7 @@ struct X86EFlags
             value |= CF;
 
         // Overflow Flag (OF) - signed overflow
-        if constexpr (std::is_floating_point_v<T>) 
+        if constexpr (std::is_floating_point_v<T>)
         {
             // For floating-point, check for infinity
             if (std::isinf(lhs) || std::isinf(rhs))
@@ -150,7 +148,7 @@ struct X86EFlags
         }
     }
 
-    void update_compare_flags_sse(float lhs, float rhs) 
+    void update_compare_flags_sse(float lhs, float rhs)
     {
         clear_compare_flags();
 
@@ -211,7 +209,7 @@ struct X86EFlags
         }
     }
 
-    void update_test_flags(uint32_t result) 
+    void update_test_flags(uint32_t result)
     {
         value &= ~(CF | OF | SF | ZF | PF);  //Clear affected flags
         if (result == 0) value |= ZF;
@@ -299,7 +297,7 @@ struct X86Context
             uint32_t u32[4]; // Per-lane integer access
         } vec[8];  // Indexed by register number (0-7)
     };
-    uint32_t mxcsr = 0x1F80; 
+    uint32_t mxcsr = 0x1F80;
     X87FPU fpu;
     // Other State Information (optional)
     uint8_t* base; // Base address for memory access

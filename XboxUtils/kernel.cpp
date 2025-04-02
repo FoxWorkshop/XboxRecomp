@@ -124,7 +124,7 @@ void LoadKernelFunctions(Image& image)
                 if (std::find(std::begin(variablesID), std::end(variablesID), index) == std::end(variablesID))
                 {
                     kernelAddrMap.insert({ currentAddr, ordinal });
-                    image.symbols.insert({ name->second, (ordinal), 1, Symbol_Function });
+                    image.symbols.insert({ name->second, (currentAddr), 1, Symbol_Function });
                 }
             }
 

@@ -1474,7 +1474,7 @@ bool Recompiler::Recompile(
                 const auto callDst = ResolveKernelCall(targetAddress);
                 if (callDst)
                 {
-                    printFunctionCallAddr(callDst);
+                    printFunctionCallAddr(targetAddress);
                 }
                 else
                 {
