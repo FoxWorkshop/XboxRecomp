@@ -31,23 +31,23 @@
 #define X86_WEAK_FUNC(x) __attribute__((weak,noinline)) X86_FUNC(x)
 
 //Memory Load Macros
-#define X86_LOAD_U8(addr)  (*reinterpret_cast<volatile uint8_t*>(addr))
-#define X86_LOAD_U16(addr) (*reinterpret_cast<volatile uint16_t*>(addr))
-#define X86_LOAD_U32(addr) (*reinterpret_cast<volatile uint32_t*>(addr))
-#define X86_LOAD_U64(addr) (*reinterpret_cast<volatile uint64_t*>(addr))
+#define X86_LOAD_U8(addr)  (*reinterpret_cast<volatile uint8_t*>(base + (addr)))
+#define X86_LOAD_U16(addr) (*reinterpret_cast<volatile uint16_t*>(base + (addr)))
+#define X86_LOAD_U32(addr) (*reinterpret_cast<volatile uint32_t*>(base + (addr)))
+#define X86_LOAD_U64(addr) (*reinterpret_cast<volatile uint64_t*>(base + (addr)))
 
-#define X86_LOAD_F32(addr) (*reinterpret_cast<volatile float*>(addr))
-#define X86_LOAD_F64(addr) (*reinterpret_cast<volatile double*>(addr))
+#define X86_LOAD_F32(addr) (*reinterpret_cast<volatile float*>(base + (addr)))
+#define X86_LOAD_F64(addr) (*reinterpret_cast<volatile double*>(base + (addr)))
 
 //Memory Store Macros
-#define X86_STORE_U8(addr, value)  (*reinterpret_cast<volatile uint8_t*>(addr) = (value))
-#define X86_STORE_U16(addr, value) (*reinterpret_cast<volatile uint16_t*>(addr) = (value))
-#define X86_STORE_U32(addr, value) (*reinterpret_cast<volatile uint32_t*>(addr) = (value))
-#define X86_STORE_U64(addr, value) (*reinterpret_cast<volatile uint64_t*>(addr) = (value))
+#define X86_STORE_U8(addr, value)  (*reinterpret_cast<volatile uint8_t*>(base + (addr)) = (value))
+#define X86_STORE_U16(addr, value) (*reinterpret_cast<volatile uint16_t*>(base + (addr)) = (value))
+#define X86_STORE_U32(addr, value) (*reinterpret_cast<volatile uint32_t*>(base + (addr)) = (value))
+#define X86_STORE_U64(addr, value) (*reinterpret_cast<volatile uint64_t*>(base + (addr)) = (value))
 
 //Floating point variants
-#define X86_STORE_F32(addr, value) (*reinterpret_cast<volatile float*>(addr) = static_cast<float>(value))
-#define X86_STORE_F64(addr, value) (*reinterpret_cast<volatile double*>(addr) = static_cast<double>(value))
+#define X86_STORE_F32(addr, value) (*reinterpret_cast<volatile float*>(base + (addr)) = static_cast<float>(value))
+#define X86_STORE_F64(addr, value) (*reinterpret_cast<volatile double*>(base + (addr)) = static_cast<double>(value))
 
 // Safe component access macros
 #define XMM_F32(reg, idx) (ctx.vec[reg].f32[idx])
@@ -310,25 +310,19 @@ struct X86Context
 
 
 
-inline void X86_PUSH(X86Context& ctx, uint32_t value) {
+inline void X86_PUSH(X86Context& ctx, uint8_t* base, uint32_t value)
+{
     ctx.esp.u32 -= 4; // 32-bit x86 uses 4-byte stack ops
     X86_STORE_U32(ctx.esp.u32, value);
 }
 
-inline uint32_t X86_POP(X86Context& ctx) {
+inline uint32_t X86_POP(X86Context& ctx, uint8_t* base)
+{
     uint32_t value = X86_LOAD_U32(ctx.esp.u32);
     ctx.esp.u32 += 4;
     return value;
 }
 
-// Optional: Pointer-sized variants
-inline void X86_PUSHPTR(X86Context& ctx, uint32_t value) {
-    X86_PUSH(ctx, value); // Same in 32-bit mode
-}
-
-inline uint32_t X86_POPPTR(X86Context& ctx) {
-    return X86_POP(ctx);
-}
 
 // Flag Macros
 #define SET_FLAG(flag, condition) (ctx.RFLAGS = (condition) ? (ctx.RFLAGS | (flag)) : (ctx.RFLAGS & ~(flag)))

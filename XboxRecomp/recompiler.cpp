@@ -1296,19 +1296,19 @@ bool Recompiler::Recompile(
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
 
             //PUSH reg
-            println("\tX86_PUSH(ctx, {});", get_x86_reg(insn.operands[0].reg.value));
+            println("\tX86_PUSH(ctx, base, {});", get_x86_reg(insn.operands[0].reg.value));
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
         {
             //PUSH imm
             ImmWrapper immWrapper{ insn.operands[0].imm }; // Wrap the immediate value
             uint32_t imm_value = static_cast<uint32_t>(insn.operands[0].imm.value.u);
-            println("\tX86_PUSH(ctx, 0x{:X});", imm_value);
+            println("\tX86_PUSH(ctx, base, 0x{:X});", imm_value);
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
             //PUSH [mem]
-            println("\tX86_PUSH(ctx, X86_LOAD_{}({}));",
+            println("\tX86_PUSH(ctx, base, X86_LOAD_{}({}));",
                 GetOperandSizeName(insn.operands[0].size),
                 ea(insn.operands[0]));
         }
@@ -1798,13 +1798,13 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_POP:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
-            println("\t{} = X86_POP(ctx);", get_x86_reg(insn.operands[0].reg.value));
+            println("\t{} = X86_POP(ctx, base);", get_x86_reg(insn.operands[0].reg.value));
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
             const auto& dst = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            println("\tX86_STORE_{}({}, X86_POP(ctx));", size_suffix, ea(dst));
+            println("\tX86_STORE_{}({}, X86_POP(ctx, base));", size_suffix, ea(dst));
         }
         break;
     case ZYDIS_MNEMONIC_RET:
@@ -2173,7 +2173,7 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_LEAVE:
         //Equivalent to: mov esp,ebp; pop ebp
         println("\tctx.esp.u32 = ctx.ebp.u32;");
-        println("\tctx.ebp.u32 = X86_POP(ctx);");
+        println("\tctx.ebp.u32 = X86_POP(ctx, base);");
         break;
     case ZYDIS_MNEMONIC_STOSD:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP)
@@ -2332,7 +2332,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_PUSHFD:
-        println("\tX86_PUSH(ctx, ctx.eflags.value);");
+        println("\tX86_PUSH(ctx, base, ctx.eflags.value);");
         break;
     case ZYDIS_MNEMONIC_XCHG:
         if (insn.insn.operand_count >= 2)
