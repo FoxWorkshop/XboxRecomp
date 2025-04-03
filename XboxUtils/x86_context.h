@@ -57,7 +57,7 @@
 #define X86_CALL_FUNC(x) x(ctx, base)
 #endif
 
-#define X86_MEMORY_SIZE 0x100000000ull
+#define X86_MEMORY_SIZE 0x7FFFFFFull
 
 #define X86_LOOKUP_FUNC(x, y) *(X86Func**)(x + X86_IMAGE_BASE + X86_IMAGE_SIZE + (uint64_t(uint32_t(y) - X86_CODE_BASE) * 2))
 
