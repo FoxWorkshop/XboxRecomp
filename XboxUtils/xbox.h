@@ -7,6 +7,7 @@
 #endif
 
 extern "C" void* MmGetHostAddress(uint32_t ptr);
+
 template<typename T>
 struct xpointer
 {
@@ -22,7 +23,7 @@ struct xpointer
 
     T* get() const
     {
-        if (!ptr.value)
+        if (!ptr)  
         {
             return nullptr;
         }
