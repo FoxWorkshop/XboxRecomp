@@ -57,7 +57,7 @@
 #define X86_CALL_FUNC(x) x(ctx, base)
 #endif
 
-#define X86_MEMORY_SIZE 0x7FFFFFFull
+#define X86_MEMORY_SIZE 0x100000000ull
 
 #define X86_LOOKUP_FUNC(x, y) *(X86Func**)(x + X86_IMAGE_BASE + X86_IMAGE_SIZE + (uint64_t(uint32_t(y) - X86_CODE_BASE) * 2))
 
@@ -347,5 +347,9 @@ inline __m128i X86_AVG_EPU16(__m128i a, __m128i b)
     return _mm_avg_epu16(a, b);
 }
 
+uint32_t GetCurrentThreadId(X86Context& ctx, uint8_t* base);
+
+uint32_t GetXboxThreadFlags(X86Context& ctx, uint8_t* base);
+uint32_t GetActiveRpcHandle(X86Context& ctx, uint8_t* base);
 
 #endif // X86_CONTEXT_H_INCLUDED

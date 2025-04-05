@@ -13,33 +13,28 @@ struct xpointer
 {
     uint32_t ptr;
 
-    xpointer() : ptr(0)
-    {
+    // Default constructor (nullptr)
+    xpointer() : ptr(0) {}
+
+    // Constructor from uint32_t (Xbox address)
+    explicit xpointer(uint32_t address) : ptr(address) {}
+
+    // Constructor from host pointer
+    explicit xpointer(T* host_ptr) : ptr(host_ptr ?
+        (reinterpret_cast<uintptr_t>(host_ptr) - reinterpret_cast<uintptr_t>(MmGetHostAddress(0))) : 0) {
     }
 
-    xpointer(T* p) : ptr(p != nullptr ? (reinterpret_cast<size_t>(p) - reinterpret_cast<size_t>(MmGetHostAddress(0))) : 0)
-    {
+    // Get host pointer
+    T* get() const {
+        return ptr ? reinterpret_cast<T*>(MmGetHostAddress(ptr)) : nullptr;
     }
 
-    T* get() const
-    {
-        if (!ptr)  
-        {
-            return nullptr;
-        }
+    // Dereference operators
+    operator T* () const { return get(); }
+    T* operator->() const { return get(); }
 
-        return reinterpret_cast<T*>(MmGetHostAddress(ptr));
-    }
-
-    operator T* () const
-    {
-        return get();
-    }
-
-    T* operator->() const
-    {
-        return get();
-    }
+    // Boolean conversion for if(Dpc) checks
+    explicit operator bool() const { return ptr != 0; }
 };
 
 

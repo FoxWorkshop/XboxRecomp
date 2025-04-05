@@ -1192,6 +1192,24 @@ bool Recompiler::Recompile(
             }
         };
 
+    auto HandleFsValue = [&](uint8_t offset, std::string reg)
+        {
+            switch (offset)
+            {
+            case 0x20:
+                println("\t{} = GetCurrentThreadId(ctx, base);", reg);
+                break;
+            case 0x24:
+                println("\t{} = GetXboxThreadFlags(ctx, base);", reg);
+                break;
+            case 0x28:
+                println("\t{} = GetActiveRpcHandle(ctx, base);", reg);
+                break;
+            default:
+                println("\t{} = 0; //Unknown FS offset: 0x{:X}", reg, offset);
+                break;
+            }
+        };
 
 
     auto printFunctionCallAddr = [&](uint32_t address)
@@ -1231,6 +1249,7 @@ bool Recompiler::Recompile(
             insn.operands[0].mem.disp.value) {
             targetAddress += insn.operands[0].mem.disp.value;
         }
+
 
         // Always use hex for addresses
         std::string targetStr = fmt::format("0x{:X}", targetAddress);
@@ -1293,6 +1312,16 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_PUSH:
 
+        //xbox kernel stuff
+        if (insn.operands[0].mem.segment == ZYDIS_REGISTER_FS) 
+        {
+            uint32_t offset = insn.operands[0].mem.disp.value;
+            println("\t// PUSH FS:[0x{:X}]", offset);
+            HandleFsValue(offset, "tmp_value"); 
+            println("\tX86_PUSH(ctx, base, tmp_value);");
+            break;
+        }
+
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
 
             //PUSH reg
@@ -1315,28 +1344,41 @@ bool Recompiler::Recompile(
 
         break;
     case ZYDIS_MNEMONIC_MOV:
-        if (insn.insn.operand_count >= 2) {
+        if (insn.insn.operand_count >= 2) 
+        {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* sizeSuffix = GetOperandSizeName(dst.size);
 
+            //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS) 
+            {
+                uint32_t offset = src.mem.disp.value;
+                println("\t//FS read at offset 0x{:X}", offset);
+                HandleFsValue(offset, get_x86_reg(dst.reg.value));
+                break;
+            }
+
             // MOV reg, imm
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) 
+            {
                 println("\t{} = {};",
                     get_x86_reg(dst.reg.value),  // Automatically includes .u8/.u16/.u32
                     src.imm.value.u);
             }
             // MOV reg, reg
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
                 println("\t{} = {};",
                     get_x86_reg(dst.reg.value),
                     get_x86_reg(src.reg.value));
             }
             // MOV reg, [mem]
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
                 println("\t{} = X86_LOAD_{}({});",
                     get_x86_reg(dst.reg.value),
                     sizeSuffix,
@@ -1362,12 +1404,24 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVSX:
+
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* srcSizeSuffix = GetOperandSizeName(src.size);
             const char* dstSizeSuffix = GetOperandSizeName(dst.size);
+
+            //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
+            {
+                uint32_t offset = src.mem.disp.value;
+                println("\t// Sign-extended FS read at offset 0x{:X}", offset);
+                std::string tempVar = "tmp_value_" + std::to_string(base);
+                HandleFsValue(offset, tempVar);
+                println("\t{} = static_cast<{}>(tmp_value);", get_x86_reg(dst.reg.value), (dst.size == 16) ? "int16_t" : "int32_t");
+                break;
+            }
 
             if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
@@ -1740,17 +1794,26 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_JBE:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)", base, insn);
+            //printConditionalBranch(false, "ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)", base, insn);
+            printConditionalBranch(false,
+                "(ctx.eflags.value & X86EFlags::CF) || "
+                "(ctx.eflags.value & X86EFlags::ZF)",
+                base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNBE:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "!(ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF))", base, insn);
+            //printConditionalBranch(false, "!(ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF))", base, insn);
+            printConditionalBranch(false,
+                "!(ctx.eflags.value & X86EFlags::CF) && "
+                "!(ctx.eflags.value & X86EFlags::ZF)",
+                base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JB:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "ctx.eflags.CF", base, insn);
+            //printConditionalBranch(false, "ctx.eflags.CF", base, insn);
+            printConditionalBranch(false, "(ctx.eflags.value & 0x1)", base, insn); 
         }
         break;
     case ZYDIS_MNEMONIC_JNB:
@@ -1759,8 +1822,9 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_JL:
-        if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "ctx.eflags.SF != ctx.eflags.OF", base, insn);
+        if (insn.insn.operand_count >= 1) 
+        {
+            printConditionalBranch(false, "((ctx.eflags.value >> 7) & 1) != ((ctx.eflags.value >> 11) & 1)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JLE:
@@ -1780,10 +1844,12 @@ bool Recompiler::Recompile(
             base, insn);
         break;
     case ZYDIS_MNEMONIC_JNS:
-        printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
+       // printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
+        printConditionalBranch(false, "!(ctx.eflags.value & X86EFlags::SF)", base, insn);
         break;
     case ZYDIS_MNEMONIC_JS:
-        printConditionalBranch(true, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
+        //printConditionalBranch(true, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
+        printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
         break;
     case ZYDIS_MNEMONIC_JP:
         if (insn.insn.operand_count >= 1) {
@@ -1796,6 +1862,15 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_POP:
+        //xbox kernel stuff
+        if (insn.operands[0].mem.segment == ZYDIS_REGISTER_FS) 
+        {
+            uint32_t offset = insn.operands[0].mem.disp.value;
+            println("\t//POP FS:[0x{:X}] (skipped)", offset);
+            println("\t(void)X86_POP(ctx, base);  // Discard value");
+            break;
+        }
+
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
             println("\t{} = X86_POP(ctx, base);", get_x86_reg(insn.operands[0].reg.value));
@@ -1956,7 +2031,17 @@ bool Recompiler::Recompile(
                 //Handle regular indirect jump
                  // Handle regular indirect jump dynamically
                 //println("\tX86_CALL_INDIRECT_FUNC({}.u32);", ea(insn.operands[0]));
-                println("\tX86_CALL_INDIRECT_FUNC(X86_LOAD_U32({}));", ea(insn.operands[0]));
+
+                uint32_t targetAddress = insn.operands[0].mem.disp.value;
+                const auto callDst = ResolveKernelCall(targetAddress);
+                if (callDst)
+                {
+                    printFunctionCallAddr(targetAddress);
+                }
+                else
+                {
+                    println("\tX86_CALL_INDIRECT_FUNC(X86_LOAD_U32({}));", ea(insn.operands[0]));
+                }
                 println("\treturn;");
             }
         }
@@ -2503,6 +2588,19 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_MOVZX:
         if (insn.insn.operand_count >= 2)
         {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                src.mem.segment == ZYDIS_REGISTER_FS) {
+                uint32_t offset = src.mem.disp.value;
+                auto dst_reg = get_x86_reg(dst.reg.value);
+
+                println("\t// movzx {}, byte ptr fs:[0x{:X}]", dst_reg, offset);
+                println("\t{} = GetXboxThreadFlags(ctx, base);", dst_reg);
+                break;
+            }
+
             //MOVZX reg, reg
             if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
