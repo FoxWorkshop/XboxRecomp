@@ -1,6 +1,5 @@
 #include "image.h"
 #include "elf.h"
-#include "xex.h"
 #include <cassert>
 #include <cstring>
 #include "xbe.h"
