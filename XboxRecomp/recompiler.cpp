@@ -1904,10 +1904,16 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_RET:
+        if (insn.insn.operand_count > 0 && insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) 
+        {
+            uint16_t stack_adjust = insn.operands[0].imm.value.u;
+            if (stack_adjust > 0)
+                println("\tctx.esp.u32 += 0x{:X};  //Adjust stack pointer", stack_adjust);
+        }
         println("\treturn;");
         break;
     case ZYDIS_MNEMONIC_STD:
-        println("\tctx.eflags.set_df(true);  // Set backward direction");
+        println("\tctx.eflags.set_df(true);  //Set backward direction");
         break;
     case ZYDIS_MNEMONIC_ADD:
         if (insn.insn.operand_count >= 2)
@@ -2081,7 +2087,7 @@ bool Recompiler::Recompile(
         println("\t\tctx.edx.i32 = static_cast<int32_t>(" + diviVar + " & 3); ");
         println("\t}} else {{");
         println("\t\tctx.eax.i32 = static_cast<int32_t>(" + diviVar + " / {}); ", divisor);
-        println("\t\tctx.edx.i32 = static_cast<int32_t>(" + diviVar +" % {}); ", divisor);
+        println("\t\tctx.edx.i32 = static_cast<int32_t>(" + diviVar + " % {}); ", divisor);
         println("\t}}");
         println("\tctx.eflags.value &= ~(X86EFlags::OF | X86EFlags::ZF); //post-div cleanup");
     }
