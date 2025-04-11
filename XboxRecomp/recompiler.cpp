@@ -31,6 +31,19 @@ inline const char* GetOperandSizeName(uint16_t size)
     }
 }
 
+inline const char* GetOperandTypeName(uint16_t size) 
+{
+    switch (size) {
+    case 8:  
+        return "uint8_t";
+    case 16: 
+        return "uint16_t";
+    case 32: 
+        return "uint32_t";
+    default: throw std::runtime_error("Unsupported operand size");
+    }
+}
+
 namespace std {
     template <typename T, size_t N>
     struct hash<std::array<T, N>> {
@@ -123,23 +136,21 @@ void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
 
 struct ImmWrapper {
     ZydisDecodedOperandImm_ imm;
-
-    friend std::ostream& operator<<(std::ostream& os, const ImmWrapper& wrapper) {
-        return os << "0x" << std::hex << wrapper.imm.value.u;
-    }
 };
 
-// Specialize fmt::formatter for ImmWrapper
+
 template <>
 struct fmt::formatter<ImmWrapper> {
-    constexpr auto parse(fmt::format_parse_context& ctx) {
-        return ctx.begin(); // No format specifiers needed
+    constexpr auto parse(fmt::format_parse_context& ctx) 
+    {
+        return ctx.begin();
     }
 
     template <typename FormatContext>
-    auto format(const ImmWrapper& wrapper, FormatContext& ctx) const {
-        // Formatting the immediate value
-        return fmt::format_to(ctx.out(), "{}", wrapper.imm.value.u);
+    auto format(const ImmWrapper& wrapper, FormatContext& ctx) const
+    {
+        // Format as hex with "0x" prefix
+        return fmt::format_to(ctx.out(), "0x{:x}", wrapper.imm.value.u);
     }
 };
 
@@ -1116,7 +1127,8 @@ bool Recompiler::Recompile(
         std::string result;
 
         // Helper to get address-ready register string (always .u32)
-        auto get_addr_reg = [&](ZydisRegister reg) -> std::string {
+        auto get_addr_reg = [&](ZydisRegister reg) -> std::string 
+            {
             switch (ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_COMPAT_32, reg)) {
             case ZYDIS_REGISTER_EAX:
                 return "ctx.eax.u32";
@@ -1196,14 +1208,17 @@ bool Recompiler::Recompile(
         {
             switch (offset)
             {
-            case 0x20:
-                println("\t{} = GetCurrentThreadId(ctx, base);", reg);
+            case 0x20: //Thread ID
+                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x20); //Get Thread ID", reg);
                 break;
-            case 0x24:
-                println("\t{} = GetXboxThreadFlags(ctx, base);", reg);
+            case 0x24:  //Thread Flags
+                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x24);  //ThreadFlags (FS:[0x24])", reg);
                 break;
-            case 0x28:
-                println("\t{} = GetActiveRpcHandle(ctx, base);", reg);
+            case 0x2C:  //TLS Array Base
+                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x2C);  //TLS Array (FS:[0x2C])", reg);
+                break;
+            case 0x28: 
+                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x28);  //RPC Handle (FS:[0x28])", reg);
                 break;
             default:
                 println("\t{} = 0; //Unknown FS offset: 0x{:X}", reg, offset);
@@ -1251,7 +1266,6 @@ bool Recompiler::Recompile(
         }
 
 
-        // Always use hex for addresses
         std::string targetStr = fmt::format("0x{:X}", targetAddress);
 
         if (targetAddress == 0)
@@ -1296,6 +1310,19 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.pop();");
         };
 
+    auto format_operand = [&](const ZydisDecodedOperand& op, const char* size_suffix = "U32") -> std::string {
+        if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            return get_x86_reg(op.reg.value);
+        }
+        else if (op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            return fmt::format("0x{:X}u", static_cast<uint32_t>(op.imm.value.u));
+        }
+        else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            return fmt::format("X86_LOAD_{}({})", size_suffix, ea(op));
+        }
+        return "";
+        };
+
 
     // Handle x86 instructions
     switch (insn.insn.mnemonic)
@@ -1317,13 +1344,16 @@ bool Recompiler::Recompile(
         {
             uint32_t offset = insn.operands[0].mem.disp.value;
             println("\t// PUSH FS:[0x{:X}]", offset);
-            HandleFsValue(offset, "tmp_value"); 
-            println("\tX86_PUSH(ctx, base, tmp_value);");
+            std::string tempVar = "tmp_value_" + std::to_string(base);
+            println("\tuint32_t " + tempVar + ";");
+ 
+            HandleFsValue(offset, tempVar);
+            println("\tX86_PUSH(ctx, base, {});", tempVar);
             break;
         }
 
-        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) 
+        {
             //PUSH reg
             println("\tX86_PUSH(ctx, base, {});", get_x86_reg(insn.operands[0].reg.value));
         }
@@ -1348,10 +1378,11 @@ bool Recompiler::Recompile(
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
-            const char* sizeSuffix = GetOperandSizeName(dst.size);
+            const char* size_suffix = GetOperandSizeName(dst.size);
 
+            //FS is Xbox kernel stuff
             //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
-            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS) 
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
             {
                 uint32_t offset = src.mem.disp.value;
                 println("\t//FS read at offset 0x{:X}", offset);
@@ -1359,47 +1390,21 @@ bool Recompiler::Recompile(
                 break;
             }
 
-            // MOV reg, imm
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) 
+            std::string src_str = format_operand(src, size_suffix);
+            std::string dst_str = get_x86_reg(dst.reg.value); // Always a register for MOV
+
+            if (!src_str.empty()) 
             {
-                println("\t{} = {};",
-                    get_x86_reg(dst.reg.value),  // Automatically includes .u8/.u16/.u32
-                    src.imm.value.u);
-            }
-            // MOV reg, reg
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) 
-            {
-                println("\t{} = {};",
-                    get_x86_reg(dst.reg.value),
-                    get_x86_reg(src.reg.value));
-            }
-            // MOV reg, [mem]
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
-            {
-                println("\t{} = X86_LOAD_{}({});",
-                    get_x86_reg(dst.reg.value),
-                    sizeSuffix,
-                    ea(src, true));
-            }
-            // MOV [mem], reg
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
-            {
-                println("\tX86_STORE_{}({}, {});",
-                    sizeSuffix,
-                    ea(dst, true),
-                    get_x86_reg(src.reg.value));
-            }
-            // MOV [mem], imm
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                println("\tX86_STORE_{}({}, {});",
-                    sizeSuffix,
-                    ea(dst, true),
-                    src.imm.value.u);
+                // Special case for memory destinations
+                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+                {
+                    println("\tX86_STORE_{}({}, {});",
+                        size_suffix, ea(dst), src_str);
+                }
+                else 
+                {
+                    println("\t{} = {};", dst_str, src_str);
+                }
             }
         }
         break;
@@ -1458,34 +1463,29 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CMP:
-        if (insn.insn.operand_count >= 2)
+        if (insn.insn.operand_count >= 2) 
         {
-            // Handle both operands simply
-            auto get_operand = [&](const ZydisDecodedOperand& op) -> std::string
-                {
-                    if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                    {
-                        return get_x86_reg(op.reg.value);
-                    }
-                    else if (op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-                    {
-                        return std::to_string(op.imm.value.u);
-                    }
-                    else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                    {
-                        return "X86_LOAD_U32(" + ea(op) + ")";
-                    }
-                    return "";
-                };
+            const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
 
-            std::string lhs = get_operand(insn.operands[0]);
-            std::string rhs = get_operand(insn.operands[1]);
+            //Special handling for 32-bit memory compares
+            if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY && insn.operands[0].size == 32)
+            {
+                std::string lhs = fmt::format("X86_LOAD_U32({})", ea(insn.operands[0]));
+                std::string rhs = fmt::format("0x{:X}u", static_cast<uint32_t>(insn.operands[1].imm.value.u));
 
-            if (!lhs.empty() && !rhs.empty()) {
-                // Default to 32-bit comparison (covers most cases)
                 println("\tctx.eflags.update_compare_flags<uint32_t>({}, {});", lhs, rhs);
             }
+            else 
+            {
+                const char* type_name = GetOperandTypeName(insn.operands[0].size);
+                const char* size_name = GetOperandSizeName(insn.operands[0].size);
 
+
+                std::string lhs = format_operand(insn.operands[0], size_name);
+                std::string rhs = format_operand(insn.operands[1], size_name);
+
+                println("\tctx.eflags.update_compare_flags<{}>({}, {});", type_name, lhs, rhs);
+            }
         }
         break;
     case ZYDIS_MNEMONIC_COMISS:
@@ -1542,6 +1542,9 @@ bool Recompiler::Recompile(
                 println("\tX86_CALL_INDIRECT_FUNC({});", get_x86_reg(insn.operands[0].reg.value));
             }
         }
+        break;
+    case ZYDIS_MNEMONIC_CDQ:
+        println("\tctx.edx.u32 = (ctx.eax.i32 >> 31) * 0xFFFFFFFFu;");
         break;
     case ZYDIS_MNEMONIC_CLD:
         println("\tctx.eflags.set_df(false);  // Set forward direction");
@@ -1786,79 +1789,97 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_JZ:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) != 0", base, insn);
+        }
+        break;
+
+        // For JNZ (Jump if Not Zero)
     case ZYDIS_MNEMONIC_JNZ:
-        if (insn.insn.operand_count >= 2)
-        {
-            printConditionalBranch(false, "ctx.eflags.ZF", base, insn);
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) == 0", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JBE:
         if (insn.insn.operand_count >= 1) {
-            //printConditionalBranch(false, "ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)", base, insn);
             printConditionalBranch(false,
-                "(ctx.eflags.value & X86EFlags::CF) || "
-                "(ctx.eflags.value & X86EFlags::ZF)",
+                "((ctx.eflags.value & X86EFlags::CF) != 0) || ((ctx.eflags.value & X86EFlags::ZF) != 0)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNBE:
         if (insn.insn.operand_count >= 1) {
-            //printConditionalBranch(false, "!(ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF))", base, insn);
             printConditionalBranch(false,
-                "!(ctx.eflags.value & X86EFlags::CF) && "
-                "!(ctx.eflags.value & X86EFlags::ZF)",
+                "((ctx.eflags.value & X86EFlags::CF) == 0) && ((ctx.eflags.value & X86EFlags::ZF) == 0)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JB:
         if (insn.insn.operand_count >= 1) {
-            //printConditionalBranch(false, "ctx.eflags.CF", base, insn);
-            printConditionalBranch(false, "(ctx.eflags.value & 0x1)", base, insn); 
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::CF) != 0", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNB:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "!ctx.eflags.CF", base, insn);
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::CF) == 0", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JL:
-        if (insn.insn.operand_count >= 1) 
-        {
-            printConditionalBranch(false, "((ctx.eflags.value >> 7) & 1) != ((ctx.eflags.value >> 11) & 1)", base, insn);
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false,
+                "(((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JLE:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) || "
-                "((ctx.eflags.value & X86EFlags::SF) != (ctx.eflags.value & X86EFlags::OF))", base, insn);
+            printConditionalBranch(false,
+                "((ctx.eflags.value & X86EFlags::ZF) != 0) || (((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                base, insn);
         }
         break;
-    case ZYDIS_MNEMONIC_JNLE:  //Jump if ZF=0 AND SF=OF
-        printConditionalBranch(false,
-            "(!(ctx.eflags.value & X86EFlags::ZF) && ((ctx.eflags.value & X86EFlags::SF) == (ctx.eflags.value & X86EFlags::OF)))",
-            base, insn);
+    case ZYDIS_MNEMONIC_JNLE:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false,
+                "((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                base, insn);
+        }
         break;
-    case ZYDIS_MNEMONIC_JNL:  //Jump if SF == OF (not less)
-        printConditionalBranch(false,
-            "((ctx.eflags.value & X86EFlags::SF) == (ctx.eflags.value & X86EFlags::OF))",
-            base, insn);
+    case ZYDIS_MNEMONIC_JNL:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false,
+                "(((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                base, insn);
+        }
         break;
     case ZYDIS_MNEMONIC_JNS:
-       // printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
-        printConditionalBranch(false, "!(ctx.eflags.value & X86EFlags::SF)", base, insn);
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF) == 0", base, insn);
+        }
         break;
     case ZYDIS_MNEMONIC_JS:
-        //printConditionalBranch(true, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
-        printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF)", base, insn);
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF) != 0", base, insn);
+        }
         break;
     case ZYDIS_MNEMONIC_JP:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "ctx.eflags.PF", base, insn);
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::PF) != 0", base, insn);
+        }
+        break;
+    case ZYDIS_MNEMONIC_JNP:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::PF) == 0", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JO:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "ctx.eflags.OF", base, insn);
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::OF) != 0", base, insn);
+        }
+        break;
+    case ZYDIS_MNEMONIC_JNO:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::OF) == 0", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_POP:
@@ -1892,50 +1913,18 @@ bool Recompiler::Recompile(
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
-            const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
+            std::string lhs = format_operand(dst, size_suffix);
+            std::string rhs = format_operand(insn.operands[1], size_suffix);
 
-            // ADD reg, imm
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                println("\t{} += {};",
-                    get_x86_reg(dst.reg.value),
-                    src.imm.value.u);
-            }
-            // ADD reg, reg
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t{} += {};",
-                    get_x86_reg(dst.reg.value),
-                    get_x86_reg(src.reg.value));
-            }
-            // ADD reg, [mem]
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\t{} += X86_LOAD_{}({});",
-                    get_x86_reg(dst.reg.value),
-                    size_suffix,
-                    ea(src));
-            }
-            // ADD [mem], reg
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\tX86_STORE_{}({}, X86_LOAD_{}({}) + {});",
-                    size_suffix,
-                    ea(dst),
-                    size_suffix,
-                    ea(dst),
-                    get_x86_reg(src.reg.value));
-            }
-            // ADD [mem], imm
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                println("\tX86_STORE_{}({}, X86_LOAD_{}({}) + {});",
-                    size_suffix,
-                    ea(dst),
-                    size_suffix,
-                    ea(dst),
-                    src.imm.value.u);
+            if (!lhs.empty() && !rhs.empty()) {
+                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                    println("\tX86_STORE_{}({}, X86_LOAD_{}({}) + {});",
+                        size_suffix, ea(dst), size_suffix, ea(dst), rhs);
+                }
+                else {
+                    println("\t{} += {};", lhs, rhs);
+                }
             }
         }
         break;
@@ -2075,6 +2064,28 @@ bool Recompiler::Recompile(
             println("\treturn;");
         }
         break;
+    case ZYDIS_MNEMONIC_IDIV:
+    {
+        const std::string divisor = (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) ?
+            get_x86_reg(insn.operands[0].reg.value) :
+            fmt::format("static_cast<int32_t>(X86_LOAD_U32({}))", ea(insn.operands[0]));
+
+        println("\tif ({} == 0) {{", divisor);
+        println("\t\t//XboxRaiseException(STATUS_INTEGER_DIVIDE_BY_ZERO);");
+        println("\t\treturn;");
+        println("\t}}");
+        std::string diviVar = "dividend_" + std::to_string(base);
+        println("\tint64_t " + diviVar + " = (static_cast<int64_t>(ctx.edx.i32) << 32) | ctx.eax.u32; ");
+        println("\tif ({} == -4) {{", divisor);
+        println("\t\tctx.eax.i32 = -static_cast<int32_t>(" + diviVar + " >> 2); // Xbox stack alignment trick");
+        println("\t\tctx.edx.i32 = static_cast<int32_t>(" + diviVar + " & 3); ");
+        println("\t}} else {{");
+        println("\t\tctx.eax.i32 = static_cast<int32_t>(" + diviVar + " / {}); ", divisor);
+        println("\t\tctx.edx.i32 = static_cast<int32_t>(" + diviVar +" % {}); ", divisor);
+        println("\t}}");
+        println("\tctx.eflags.value &= ~(X86EFlags::OF | X86EFlags::ZF); //post-div cleanup");
+    }
+        break;
     case ZYDIS_MNEMONIC_IMUL:
         if (insn.insn.operand_count >= 2)
         {
@@ -2175,72 +2186,104 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_AND:
-        if (insn.insn.operand_count >= 2 &&
-            insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-        {
-            //AND reg, imm
-            ImmWrapper immWrapper{ insn.operands[1].imm };
-            println("\t{} &= {};", get_x86_reg(insn.operands[0].reg.value), immWrapper);
-        }
-        else if (insn.insn.operand_count >= 2 &&
-            insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
-        {
-            //AND reg, reg
-            println("\t{} &= {};", get_x86_reg(insn.operands[0].reg.value), get_x86_reg(insn.operands[1].reg.value));
-        }
-        else if (insn.insn.operand_count >= 2 &&
-            insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-            insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
-        {
-            // AND reg, [mem] -> reg &= [mem]
-            const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
-            println("\t{} &= X86_LOAD_{}({});", get_x86_reg(insn.operands[0].reg.value), size_suffix,
-                ea(insn.operands[1]));
-        }
-        else if (insn.insn.operand_count >= 2 &&
-            insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
-            insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
-        {
-            //AND [mem], reg -> [mem] &= reg
-            const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
-            println("\tX86_STORE_{}({}, X86_LOAD_{}({}) & {});", size_suffix, ea(insn.operands[0]),
-                size_suffix, ea(insn.operands[0]), get_x86_reg(insn.operands[1].reg.value));
+        if (insn.insn.operand_count >= 2) {
+            const uint16_t op_size = insn.operands[0].size;
+            const char* size_suffix = GetOperandSizeName(op_size);
+
+
+            auto mask_imm = [op_size](uint64_t imm) -> uint64_t {
+                switch (op_size) {
+                case 8:  
+                    return imm & 0xFF;
+                case 16: 
+                    return imm & 0xFFFF;
+                case 32: 
+                    return imm & 0xFFFFFFFF;
+                default: throw 
+                    std::runtime_error("Unsupported operand size");
+                }
+                };
+
+            // Case 1: AND reg, imm
+            if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+            {
+                uint64_t masked_imm = mask_imm(insn.operands[1].imm.value.u);
+                println("\t{} &= 0x{:X}; // AND {} with masked immediate",
+                    get_x86_reg(insn.operands[0].reg.value),
+                    masked_imm,
+                    get_x86_reg(insn.operands[0].reg.value));
+            }
+            // Case 2: AND reg, reg
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\t{} &= {};",
+                    get_x86_reg(insn.operands[0].reg.value),
+                    get_x86_reg(insn.operands[1].reg.value));
+            }
+            // Case 3: AND reg, [mem]
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                println("\t{} &= X86_LOAD_{}({});",
+                    get_x86_reg(insn.operands[0].reg.value),
+                    size_suffix,
+                    ea(insn.operands[1]));
+            }
+            // Case 4: AND [mem], reg
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\tX86_STORE_{}({}, X86_LOAD_{}({}) & {});",
+                    size_suffix,
+                    ea(insn.operands[0]),
+                    size_suffix,
+                    ea(insn.operands[0]),
+                    get_x86_reg(insn.operands[1].reg.value));
+            }
+            // Case 5: AND [mem], imm
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+            {
+                uint64_t masked_imm = mask_imm(insn.operands[1].imm.value.u);
+
+                if (masked_imm == 0) {
+                    println("\tX86_STORE_{}({}, 0x0); // Optimized AND 0",
+                        size_suffix,
+                        ea(insn.operands[0]));
+                }
+                else {
+                    println("\tX86_STORE_{}({}, X86_LOAD_{}({}) & 0x{:X});",
+                        size_suffix,
+                        ea(insn.operands[0]),
+                        size_suffix,
+                        ea(insn.operands[0]),
+                        masked_imm);
+                }
+            }
+
         }
         break;
     case ZYDIS_MNEMONIC_TEST:
         if (insn.insn.operand_count >= 2)
         {
-            const auto& dst = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(dst.size);
-
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\tctx.eflags.update_test_flags({} & {});", get_x86_reg(dst.reg.value),
-                    get_x86_reg(insn.operands[1].reg.value));
-            }
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                println("\tctx.eflags.update_test_flags({} & {});", get_x86_reg(dst.reg.value),
-                    insn.operands[1].imm.value.u);
-            }
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\tctx.eflags.update_test_flags({} & X86_LOAD_{}({}));", get_x86_reg(dst.reg.value),
-                    size_suffix, ea(insn.operands[1]));
-            }
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\tctx.eflags.update_test_flags(X86_LOAD_{}({}) & {});",
-                    size_suffix, ea(dst), get_x86_reg(insn.operands[1].reg.value));
-            }
-            // TEST [mem], imm
-            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+            const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
+            std::string lhs = format_operand(insn.operands[0], size_suffix);
+            std::string rhs = format_operand(insn.operands[1], size_suffix);
+            if (!lhs.empty() && !rhs.empty()) 
             {
-                println("\tctx.eflags.update_test_flags(X86_LOAD_{}({}) & {});", size_suffix,
-                    ea(dst), insn.operands[1].imm.value.u);
+                if (insn.operands[0].size == 8) 
+                {
+                    println("\tctx.eflags.update_test_flags({} & {});", lhs, rhs);
+                }
+                else if (insn.operands[0].size == 16) {
+                    println("\tctx.eflags.update_test_flags({} & {});", lhs, rhs);
+                }
+                else 
+                { 
+                    println("\tctx.eflags.update_test_flags({} & {});", lhs, rhs);
+                }
             }
         }
         break;
@@ -2591,18 +2634,30 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
-            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.mem.segment == ZYDIS_REGISTER_FS) {
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
+            {
                 uint32_t offset = src.mem.disp.value;
                 auto dst_reg = get_x86_reg(dst.reg.value);
 
                 println("\t// movzx {}, byte ptr fs:[0x{:X}]", dst_reg, offset);
-                println("\t{} = GetXboxThreadFlags(ctx, base);", dst_reg);
-                break;
-            }
 
-            //MOVZX reg, reg
-            if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
+
+                switch (offset)
+                {
+                case 0x24:  // Thread Flags (byte access)
+                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x24));",
+                        dst_reg);
+                    break;
+                case 0x28:  // RPC Handle (byte access)
+                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x28));",
+                        dst_reg);
+                    break;
+                default:
+                    println("\t{} = 0; // Unknown FS byte offset: 0x{:X}", dst_reg, offset);
+                    break;
+                }
+            }
+            else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
                 if (insn.operands[0].size == 4)
                 {
@@ -2624,25 +2679,29 @@ bool Recompiler::Recompile(
                 }
             }
             // MOVZX reg, mem
-            else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                if (insn.operands[0].size == 4) // 32-bit
+                const char* load_op = nullptr;
+
+                // Determine load size from SOURCE operand
+                switch (src.size)
                 {
-                    if (insn.operands[1].size == 1) // 8-bit
-                    {
-                        println("\t{}.u32 = (uint32_t)X86_LOAD_U8({});",
-                            get_x86_reg(insn.operands[0].reg.value), ea(insn.operands[1]));
-                    }
-                    else if (insn.operands[1].size == 2) // 16-bit
-                    {
-                        println("\t{}.u32 = (uint32_t)X86_LOAD_U16({});",
-                            get_x86_reg(insn.operands[0].reg.value), ea(insn.operands[1]));
-                    }
+                case 8:  load_op = "X86_LOAD_U8";
+                    break;
+                case 16: load_op = "X86_LOAD_U16";
+                    break;
+                default:
+                    throw std::runtime_error("Unsupported MOVZX source size");
                 }
-                else if (insn.operands[0].size == 2) // 16-bit destination
+
+                if (src.mem.base == ZYDIS_REGISTER_ECX && src.mem.disp.value == 4)
                 {
-                    println("\t{}.u16 = (uint16_t)X86_LOAD_U8({});",
-                        get_x86_reg(insn.operands[0].reg.value), ea(insn.operands[1]));
+                    println("\t// Optimized Xbox kernel version read");
+                    println("\t{} = (uint32_t){}(ctx.ecx.u32 + 4);", get_x86_reg(dst.reg.value), load_op);
+                }
+                else
+                {
+                    println("\t{} = (uint32_t){}({});", get_x86_reg(dst.reg.value), load_op, ea(src));
                 }
             }
         }

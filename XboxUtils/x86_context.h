@@ -13,6 +13,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "stdio.h"
+#include "assert.h"
+
 //#include <immintrin.h> //SSE/AVX intrinsics
 #include <x86intrin.h>
 #ifdef _WIN32
@@ -53,6 +56,9 @@
 #define XMM_F32(reg, idx) (ctx.vec[reg].f32[idx])
 #define XMM_U32(reg, idx) (ctx.vec[reg].u32[idx])
 
+#define X86_FS_LOAD(offset) X86_LOAD_U32(ctx.fs_base + (offset))
+#define X86_FS_STORE(offset, value) X86_STORE_U32(ctx.fs_base + (offset), (value))
+
 #ifndef X86_CALL_FUNC
 #define X86_CALL_FUNC(x) x(ctx, base)
 #endif
@@ -81,7 +87,9 @@ struct X86Register
     union {
         struct {
             uint32_t u32;
+            int32_t i32;
             uint16_t u16;
+            int16_t i16;
             struct {
                 uint8_t u8_lo;  // AL/CL/DL/BL
                 uint8_t u8_hi;  // AH/CH/DH/BH
@@ -94,58 +102,59 @@ struct X86EFlags
 {
     uint32_t value = 0;
 
-    // Flag bitmasks
+    // Flag bits (matches x86 architecture)
     enum : uint32_t {
-        CF = (1 << 0),  // Carry Flag
-        PF = (1 << 2),  // Parity Flag
-        AF = (1 << 4),  // Adjust Flag
-        ZF = (1 << 6),  // Zero Flag
-        SF = (1 << 7),  // Sign Flag
+        CF = 1 << 0,  // Carry
+        PF = 1 << 2,  // Parity
+        AF = 1 << 4,  // Adjust
+        ZF = 1 << 6,  // Zero
+        SF = 1 << 7,  // Sign
         DF = (1 << 10),
-        OF = (1 << 11)  // Overflow Flag
+        OF = 1 << 11  // Overflow
     };
 
+
+
     // Clear all flags affected by CMP
-    void clear_compare_flags() {
-        value &= ~(CF | PF | ZF | SF | OF);
+    void clear_compare_flags()
+    {
+        //value &= ~(CF | PF | ZF | SF | OF);
+        value &= ~(CF | PF | AF | ZF | SF | OF);
     }
 
-    template<typename T>
-    void update_compare_flags(T lhs, T rhs) {
+    // Primary comparison function
+    void update_compare_flags(uint32_t lhs, uint32_t rhs) {
+
         clear_compare_flags();
-        T result = lhs - rhs;
 
-        // Zero Flag (ZF)
-        if (result == 0)
-            value |= ZF;
+        // Calculate result and flags
+        uint32_t result = lhs - rhs;
+        bool carry = lhs < rhs;  // Unsigned overflow
 
-        // Sign Flag (SF)
-        if (std::make_signed_t<T>(result) < 0)
-            value |= SF;
+        // Zero Flag
+        if (result == 0) value |= ZF;
 
-        // Carry Flag (CF) - unsigned overflow
-        if (lhs < rhs)
+        // Sign Flag (MSB of result)
+        if (result & 0x80000000) value |= SF;
+
+        // Parity Flag (even parity of LSB)
+        uint8_t lsb = result & 0xFF;
+        if ((__builtin_popcount(lsb) % 2) == 0) value |= PF;
+
+        // Carry Flag
+        if (carry)
             value |= CF;
 
-        // Overflow Flag (OF) - signed overflow
-        if constexpr (std::is_floating_point_v<T>)
-        {
-            // For floating-point, check for infinity
-            if (std::isinf(lhs) || std::isinf(rhs))
-                value |= OF;
-        }
-        else {
-            // Original integer overflow check
-            if (((lhs ^ rhs) & (lhs ^ result)))
-                value |= OF;
-        }
+        // Overflow Flag (signed overflow)
+        bool overflow = ((lhs ^ rhs) & (lhs ^ result)) & 0x80000000;
+        if (overflow) value |= OF;
+    }
 
-        // Parity Flag (PF) - least significant byte parity
-        if constexpr (!std::is_floating_point_v<T>) {
-            uint8_t lsb = static_cast<uint8_t>(result);
-            if (__builtin_parity(lsb))
-                value |= PF;
-        }
+    // Template alias for backward compatibility
+    template<typename T>
+    void update_compare_flags(T lhs, T rhs) {
+        update_compare_flags(static_cast<uint32_t>(lhs),
+            static_cast<uint32_t>(rhs));
     }
 
     void update_compare_flags_sse(float lhs, float rhs)
@@ -174,8 +183,7 @@ struct X86EFlags
         uint64_t result_wide = a_wide - b_wide;
         uint32_t result = static_cast<uint32_t>(result_wide);
 
-        // Clear affected flags
-        value &= ~(CF | PF | AF | ZF | SF | OF);
+        clear_compare_flags();
 
         // 1. Carry Flag (unsigned overflow)
         if (result_wide > a_wide) {
@@ -211,13 +219,17 @@ struct X86EFlags
 
     void update_test_flags(uint32_t result)
     {
-        value &= ~(CF | OF | SF | ZF | PF);  //Clear affected flags
-        if (result == 0) value |= ZF;
-        if (result & (1 << 31)) value |= SF;
-        if (__builtin_parity(result & 0xFF)) value |= PF;
+        clear_compare_flags();
+
+        if (result == 0)
+            value |= ZF;
+        if (result & (1 << 31))
+            value |= SF;
+        if (!(__builtin_popcount(result & 0xFF) & 1))
+            value |= PF;
     }
 
-    // For STOS/MOVS instructions (just updates pointers)
+    // For STOS/MOVS instructions 
     void update_string_pointer(uint32_t& reg) {
         reg += (value & DF) ? -1 : 1;
     }
@@ -284,7 +296,10 @@ struct X86Context
     uint16_t ss = 0;  //Stack Segment
     uint16_t ds = 0;  //Data Segment
     uint16_t fs = 0;  //Additional Segment
+    uint32_t fs_base = 0; //Base address for FS segment
     uint16_t gs = 0;  //Additional Segment
+
+    uint8_t* teb_ptr; //Thread Environment Block pointer (for FS segment)
 
     // Flags Register
     X86EFlags eflags;
@@ -307,7 +322,6 @@ struct X86Context
         uint32_t base;   // Linear address of GDT
     } gdtr = { 0, 0 };     // Initialize to zero
 };
-
 
 
 inline void X86_PUSH(X86Context& ctx, uint8_t* base, uint32_t value)
@@ -346,10 +360,5 @@ inline __m128i X86_AVG_EPU16(__m128i a, __m128i b)
 {
     return _mm_avg_epu16(a, b);
 }
-
-uint32_t GetCurrentThreadId(X86Context& ctx, uint8_t* base);
-
-uint32_t GetXboxThreadFlags(X86Context& ctx, uint8_t* base);
-uint32_t GetActiveRpcHandle(X86Context& ctx, uint8_t* base);
 
 #endif // X86_CONTEXT_H_INCLUDED
