@@ -132,10 +132,12 @@ struct X86EFlags
         bool carry = lhs < rhs;  // Unsigned overflow
 
         // Zero Flag
-        if (result == 0) value |= ZF;
+        if (result == 0) 
+            value |= ZF;
 
         // Sign Flag (MSB of result)
-        if (result & 0x80000000) value |= SF;
+        if (result & 0x80000000) 
+            value |= SF;
 
         // Parity Flag (even parity of LSB)
         uint8_t lsb = result & 0xFF;
@@ -217,6 +219,7 @@ struct X86EFlags
         }
     }
 
+  
     void update_test_flags(uint32_t result)
     {
         clear_compare_flags();
@@ -227,6 +230,102 @@ struct X86EFlags
             value |= SF;
         if (!(__builtin_popcount(result & 0xFF) & 1))
             value |= PF;
+    }
+
+    //and, or, xor etc.
+    void update_flags_logic(uint32_t result) 
+    {
+        clear_compare_flags(); 
+
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 31) & SF;
+
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+    }
+
+    void update_flags_add(uint32_t lhs, uint32_t rhs, uint32_t result) 
+    {
+        clear_compare_flags();
+
+        value |= (result < lhs) ? CF : 0;
+        value |= (result == 0) ? ZF : 0;
+
+        // Sign Flag
+        value |= (result >> 31) & SF;
+
+        // Overflow Flag (signed overflow)
+        value |= ((lhs ^ rhs ^ 0x80000000) & (result ^ rhs) >> 31) & OF;
+
+        // Parity Flag
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+
+        // Adjust Flag (BCD carry)
+        value |= ((lhs ^ rhs ^ result) >> 4) & AF;
+    }
+
+    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result) {
+        clear_compare_flags();
+
+        // Carry Flag (unsigned underflow)
+        value |= (lhs < rhs) ? CF : 0;
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 31) & SF;
+
+        // Overflow Flag (signed underflow)
+        value |= ((lhs ^ rhs) & (lhs ^ result) >> 31) & OF;
+
+        //Parity/Adjust same as ADD
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((lhs ^ rhs ^ result) >> 4) & AF;
+    }
+
+    void update_flags_mul(bool overflow) 
+    {
+        clear_compare_flags();
+
+        if (overflow) 
+            value |= (CF | OF);       
+    }
+
+    void update_flags_inc(uint32_t old_val, uint32_t result) {
+        // Preserve Carry Flag
+        uint32_t saved_cf = value & CF;
+        clear_compare_flags();
+        value |= saved_cf;
+
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 31) & SF;
+
+        // Overflow Flag (only if 0x7FFFFFFF -> 0x80000000)
+        value |= (old_val == 0x7FFFFFFF) ? OF : 0;
+
+
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((result & 0x0F) == 0) ? AF : 0;
+    }
+
+    void update_flags_dec(uint32_t old_val, uint32_t result) 
+    {     
+        // Preserve Carry Flag
+        uint32_t saved_cf = value & CF;
+        clear_compare_flags();
+        value |= saved_cf;
+
+        value |= (result == 0) ? ZF : 0;
+
+        value |= (result >> 31) & SF;
+
+        // Overflow Flag (only if 0x80000000 -> 0x7FFFFFFF)
+        value |= (old_val == 0x80000000) ? OF : 0;
+
+        //Parity Flag
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
     }
 
     // For STOS/MOVS instructions 
@@ -326,8 +425,9 @@ struct X86Context
 
 inline void X86_PUSH(X86Context& ctx, uint8_t* base, uint32_t value)
 {
-    ctx.esp.u32 -= 4; // 32-bit x86 uses 4-byte stack ops
-    X86_STORE_U32(ctx.esp.u32, value);
+    uint32_t new_esp = ctx.esp.u32 - 4;
+    X86_STORE_U32(new_esp, value);
+    ctx.esp.u32 = new_esp;
 }
 
 inline uint32_t X86_POP(X86Context& ctx, uint8_t* base)
