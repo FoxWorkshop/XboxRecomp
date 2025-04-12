@@ -1513,6 +1513,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CALL:
+        println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
         if (insn.insn.operand_count >= 1)
         {
             // Direct call (relative offset)
@@ -1910,6 +1911,7 @@ bool Recompiler::Recompile(
             if (stack_adjust > 0)
                 println("\tctx.esp.u32 += 0x{:X};  //Adjust stack pointer", stack_adjust);
         }
+        println("\tctx.esp.u32 += 0x{:X};  //Adjust stack pointer", 4); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
         println("\treturn;");
         break;
     case ZYDIS_MNEMONIC_STD:
