@@ -2597,8 +2597,7 @@ bool Recompiler::Recompile(
                     }
                     else if (src.size == 16)
                     {
-                        // 16-bit source
-                        println("\t{} = (uint16_t){};", dst_reg, src_reg);
+                        println("\t{} = {} & 0xFFFF;", dst_reg, src_reg);
                     }
                 }
                 else if (dst.size == 16) 
