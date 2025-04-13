@@ -82,18 +82,17 @@ struct X86FuncMapping
 
 extern X86FuncMapping X86FuncMappings[];
 
-struct X86Register
-{
+struct X86Register {
     union {
+        uint32_t u32;
+        int32_t i32;
         struct {
-            uint32_t u32;
-            int32_t i32;
             uint16_t u16;
             int16_t i16;
-            struct {
-                uint8_t u8_lo;  // AL/CL/DL/BL
-                uint8_t u8_hi;  // AH/CH/DH/BH
-            };
+        };
+        struct {
+            uint8_t u8_lo;
+            uint8_t u8_hi;
         };
     };
 };
