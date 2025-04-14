@@ -848,13 +848,16 @@ void Recompiler::Analyse()
             auto funcPtr = funcsTable[i];
             if (funcPtr >= section.base && funcPtr < section.base + section.size && image.symbols.find(funcPtr) == image.symbols.end())
             {
-
+                if (funcPtr == 0xfeb30)
+                {
+                    printf("let's see\n");
+                }
                 auto code = section.data + (funcPtr - section.base);
-                auto size = section.base + section.size - funcPtr;
-                auto potentialSize = size;
+                auto max = section.base + section.size - funcPtr;
+                auto potentialEnd = max;
 
                 if (i + 1 < funcsTable.size())
-                    potentialSize = (funcsTable[i + 1] - funcPtr) + funcPtr;
+                    potentialEnd = (funcsTable[i + 1] - funcPtr) + funcPtr;
 
                 bool banned = isAddressRangeBanned(&config.bannedAddresses, funcPtr);
 
@@ -867,7 +870,7 @@ void Recompiler::Analyse()
                     continue;
                 }
 
-                auto& fn = functions.emplace_back(Function::Analyze(code, potentialSize, funcPtr, config.switchTables));
+                auto& fn = functions.emplace_back(Function::Analyze(code, potentialEnd, funcPtr, config.switchTables));
                 image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
             }
         }
@@ -994,6 +997,7 @@ std::string decode_memory_operand_NoParentheses(const ZydisDecodedOperandMem& me
 }
 
 
+
 bool Recompiler::Recompile(
     const Function& fn,
     uint32_t base,
@@ -1001,7 +1005,7 @@ bool Recompiler::Recompile(
     const uint8_t* data,
     std::unordered_map<uint32_t, RecompilerSwitchTable>::iterator& switchTable,
     RecompilerLocalVariables& localVariables,
-    CSRState& csrState)
+    CSRState& csrState, bool isLastInst)
 {
 
     char buffer[256];
@@ -1011,6 +1015,10 @@ bool Recompiler::Recompile(
 
     println("\t// {}", buffer);
 
+    if (base == 0x37F737)
+    {
+        printf("welp\n");
+    }
 
     //println("\t// {} {}", , insn.op_str);
 
@@ -1204,26 +1212,59 @@ bool Recompiler::Recompile(
             }
         };
 
-    auto HandleFsValue = [&](uint8_t offset, std::string reg)
-        {
-            switch (offset)
-            {
-            case 0x20: //Thread ID
-                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x20); //Get Thread ID", reg);
-                break;
-            case 0x24:  //Thread Flags
-                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x24);  //ThreadFlags (FS:[0x24])", reg);
-                break;
-            case 0x2C:  //TLS Array Base
-                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x2C);  //TLS Array (FS:[0x2C])", reg);
-                break;
-            case 0x28:
-                println("\t{} = *reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x28);  //RPC Handle (FS:[0x28])", reg);
-                break;
-            default:
-                println("\t{} = 0; //Unknown FS offset: 0x{:X}", reg, offset);
-                break;
+    auto HandleFsValue = [&](uint8_t offset, std::string reg, bool is_write = false) {
+        std::string teb_access = fmt::format("*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x{:X})", offset);
+
+        switch (offset) {
+        case 0x00:  // SEH Chain Head
+            if (is_write) {
+                println("\t{} = {};  // Update SEH Chain Head (FS:[0x00])", teb_access, reg);
             }
+            else {
+                println("\t{} = {};  // Read SEH Chain Head (FS:[0x00])", reg, teb_access);
+            }
+            break;
+        case 0x20:  // Thread ID
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Writing to Thread ID (FS:[0x20])", teb_access, reg);
+            }
+            else {
+                println("\t{} = {};  // Read Thread ID (FS:[0x20])", reg, teb_access);
+            }
+            break;
+        case 0x24:  // Thread Flags
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Writing to Thread Flags (FS:[0x24])", teb_access, reg);
+            }
+            else {
+                println("\t{} = {};  // Read Thread Flags (FS:[0x24])", reg, teb_access);
+            }
+            break;
+        case 0x28:  // RPC Handle
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Writing to RPC Handle (FS:[0x28])", teb_access, reg);
+            }
+            else {
+                println("\t{} = {};  // Read RPC Handle (FS:[0x28])", reg, teb_access);
+            }
+            break;
+        case 0x2C:  // TLS Array Base
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Writing to TLS Array (FS:[0x2C])", teb_access, reg);
+            }
+            else {
+                println("\t{} = {};  // Read TLS Array (FS:[0x2C])", reg, teb_access);
+            }
+            break;
+        default:
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Unknown FS write at offset 0x{:X}", teb_access, reg, offset);
+            }
+            else {
+                println("\t{} = 0;  // Unknown FS read at offset 0x{:X}", reg, offset);
+            }
+            break;
+        }
         };
 
 
@@ -1324,47 +1365,47 @@ bool Recompiler::Recompile(
         };
 
     auto get_temp_reg = [&](ZyanU16 size)
-     {
-        return fmt::format("temp_{:X}_{}", base, GetOperandSizeName(size));
-     };
-
-    auto handle_bitwise = [&](const char* op, const char* flag_updater) 
         {
-        if (insn.insn.operand_count >= 2) 
+            return fmt::format("temp_{:X}_{}", base, GetOperandSizeName(size));
+        };
+
+    auto handle_bitwise = [&](const char* op, const char* flag_updater)
         {
-            const auto& dst = insn.operands[0];
-            const auto& src = insn.operands[1];
-            const char* size_suffix = GetOperandSizeName(dst.size);
-
-            auto mask_imm = [size_suffix](uint64_t imm) -> uint64_t 
-                {
-                if (strcmp(size_suffix, "8") == 0) 
-                    return imm & 0xFF;
-                if (strcmp(size_suffix, "16") == 0) 
-                    return imm & 0xFFFF;
-                return imm & 0xFFFFFFFF; // Default 32-bit
-                };
-
-            std::string lhs = format_operand(dst, size_suffix);
-            std::string rhs = format_operand(src, size_suffix);
-
-            if (!lhs.empty() && !rhs.empty()) 
+            if (insn.insn.operand_count >= 2)
             {
-                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+                const auto& dst = insn.operands[0];
+                const auto& src = insn.operands[1];
+                const char* size_suffix = GetOperandSizeName(dst.size);
+
+                auto mask_imm = [size_suffix](uint64_t imm) -> uint64_t
+                    {
+                        if (strcmp(size_suffix, "8") == 0)
+                            return imm & 0xFF;
+                        if (strcmp(size_suffix, "16") == 0)
+                            return imm & 0xFFFF;
+                        return imm & 0xFFFFFFFF; // Default 32-bit
+                    };
+
+                std::string lhs = format_operand(dst, size_suffix);
+                std::string rhs = format_operand(src, size_suffix);
+
+                if (!lhs.empty() && !rhs.empty())
                 {
-                    std::string temp = get_temp_reg(dst.size);
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-                    println("\t{} {} {};", temp, op, rhs);
-                    println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp);
-                    println("\tctx.eflags.update_flags_logic({});", temp);
-                }
-                else 
-                {
-                    println("\t{} {} {};", lhs, op, rhs);
-                    println("\tctx.eflags.update_flags_logic({});", lhs);
+                    if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                    {
+                        std::string temp = get_temp_reg(dst.size);
+                        println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
+                        println("\t{} {} {};", temp, op, rhs);
+                        println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp);
+                        println("\tctx.eflags.update_flags_logic({});", temp);
+                    }
+                    else
+                    {
+                        println("\t{} {} {};", lhs, op, rhs);
+                        println("\tctx.eflags.update_flags_logic({});", lhs);
+                    }
                 }
             }
-        }
         };
 
     // Handle x86 instructions
@@ -1427,9 +1468,16 @@ bool Recompiler::Recompile(
             //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
             {
-                uint32_t offset = src.mem.disp.value;
+                uint32_t offset = (uint32_t)src.mem.disp.value;
                 println("\t//FS read at offset 0x{:X}", offset);
                 HandleFsValue(offset, get_x86_reg(dst.reg.value));
+                break;
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_FS)
+            {
+                uint32_t offset = (uint32_t)dst.mem.disp.value;
+                println("\t//FS write at offset 0x{:X}", offset);
+                HandleFsValue(offset, get_x86_reg(src.reg.value), true);
                 break;
             }
 
@@ -1948,7 +1996,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_RET:
-        if (insn.insn.operand_count > 0 && insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) 
+        if (insn.insn.operand_count > 0 && insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
         {
             uint16_t stack_adjust = insn.operands[0].imm.value.u;
             if (stack_adjust > 0)
@@ -1968,9 +2016,9 @@ bool Recompiler::Recompile(
             std::string lhs = format_operand(dst, size_suffix);
             std::string rhs = format_operand(insn.operands[1], size_suffix);
 
-            if (!lhs.empty() && !rhs.empty()) 
+            if (!lhs.empty() && !rhs.empty())
             {
-                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
                     std::string temp_result = get_temp_reg(dst.size);
 
@@ -1992,7 +2040,7 @@ bool Recompiler::Recompile(
         HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "+=");
         break;
     case ZYDIS_MNEMONIC_SUB:
-        if (insn.insn.operand_count >= 2) 
+        if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
@@ -2001,18 +2049,18 @@ bool Recompiler::Recompile(
             std::string lhs = format_operand(dst, size_suffix);
             std::string rhs = format_operand(src, size_suffix);
 
-            if (!lhs.empty() && !rhs.empty()) 
+            if (!lhs.empty() && !rhs.empty())
             {
-                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
-                    std::string temp = get_temp_reg(dst.size); 
+                    std::string temp = get_temp_reg(dst.size);
 
                     println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
                     println("\t{} -= {};", temp, rhs);
                     println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp);
                     println("\tctx.eflags.update_flags_sub({}, {}, {});", temp, rhs, temp);
                 }
-                else 
+                else
                 {
                     println("\t{} -= {};", lhs, rhs);
                     println("\tctx.eflags.update_flags_sub({}, {}, {});", lhs, rhs, lhs);
@@ -2108,7 +2156,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_DIV:
     case ZYDIS_MNEMONIC_IDIV:
-        if (insn.insn.operand_count >= 1) 
+        if (insn.insn.operand_count >= 1)
         {
             const auto& op = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(op.size);
@@ -2123,7 +2171,7 @@ bool Recompiler::Recompile(
 
             std::string diviend = "dividend_" + std::to_string(base);
             println("\t\tuint64_t " + diviend + " = (static_cast<uint64_t>(ctx.edx.u32) << 32) | ctx.eax.u32; ");
-            if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV) 
+            if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV)
             {
                 std::string signed_dividend = "signed_dividend_" + std::to_string(base);
                 std::string signed_divisor = "signed_divisor_" + std::to_string(base);
@@ -2176,19 +2224,19 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_INC:
-        if (insn.insn.operand_count >= 1) 
+        if (insn.insn.operand_count >= 1)
         {
             const auto& op = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(op.size);
 
-            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
                 //INC reg
                 std::string reg = get_x86_reg(op.reg.value);
                 println("\t{}++;", reg);
                 println("\tctx.eflags.update_flags_inc({}, {});", reg, reg);
             }
-            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
                 //INC [mem]
                 std::string temp = get_temp_reg(op.size);
@@ -2335,21 +2383,21 @@ bool Recompiler::Recompile(
         println("\tctx.eflags.update_string_pointer(ctx.edi.u32);");
         break;
     case ZYDIS_MNEMONIC_MUL:
-        if (insn.insn.operand_count >= 1) 
+        if (insn.insn.operand_count >= 1)
         {
             const auto& op = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(op.size);
             std::string rhs;
 
-            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) 
-                rhs = get_x86_reg(op.reg.value);   
-            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                rhs = get_x86_reg(op.reg.value);
+            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 rhs = fmt::format("X86_LOAD_{}({})", size_suffix, ea(op));
-            
+
             if (!rhs.empty())
             {
                 std::string temp_result = fmt::format("mul_result_{:X}", base);
-                println("\tuint64_t {} = static_cast<uint64_t>(ctx.eax.u32) * static_cast<uint64_t>({});",temp_result, rhs);
+                println("\tuint64_t {} = static_cast<uint64_t>(ctx.eax.u32) * static_cast<uint64_t>({});", temp_result, rhs);
                 println("\tctx.eax.u32 = static_cast<uint32_t>({} & 0xFFFFFFFF);", temp_result);
                 println("\tctx.edx.u32 = static_cast<uint32_t>({} >> 32);", temp_result);
                 println("\tctx.eflags.update_flags_mul(ctx.edx.u32 != 0);");
@@ -2578,9 +2626,9 @@ bool Recompiler::Recompile(
                 std::string src_reg = get_x86_reg(src.reg.value);
 
 
-                if (dst.size == 32) 
+                if (dst.size == 32)
                 {
-                    if (src.size == 8) 
+                    if (src.size == 8)
                     {
                         if (src.reg.value >= ZYDIS_REGISTER_AH && src.reg.value <= ZYDIS_REGISTER_BH)
                         {
@@ -2589,7 +2637,7 @@ bool Recompiler::Recompile(
                                 ZYDIS_REGISTER_EAX + (src.reg.value - ZYDIS_REGISTER_AH));
                             println("\t{} = (uint8_t)({} >> 8);", dst_reg, get_x86_reg(base_reg));
                         }
-                        else 
+                        else
                         {
                             // Low byte register (AL, CL, DL, BL)
                             println("\t{} = (uint8_t){};", dst_reg, src_reg);
@@ -2600,13 +2648,13 @@ bool Recompiler::Recompile(
                         println("\t{} = {} & 0xFFFF;", dst_reg, src_reg);
                     }
                 }
-                else if (dst.size == 16) 
+                else if (dst.size == 16)
                 {
                     // 16-bit destination
-                    if (src.size == 8) 
+                    if (src.size == 8)
                     {
                         // 8-bit source
-                        if (src.reg.value >= ZYDIS_REGISTER_AH && src.reg.value <= ZYDIS_REGISTER_BH) 
+                        if (src.reg.value >= ZYDIS_REGISTER_AH && src.reg.value <= ZYDIS_REGISTER_BH)
                         {
                             // High byte register (AH, CH, DH, BH)
                             ZydisRegister base_reg = static_cast<ZydisRegister>(
@@ -2786,10 +2834,18 @@ bool Recompiler::Recompile(
     }
 
 
+    if (isLastInst && insn.insn.mnemonic != ZYDIS_MNEMONIC_JMP && insn.insn.mnemonic != ZYDIS_MNEMONIC_RET && insn.insn.mnemonic != ZYDIS_MNEMONIC_INT3)
+    {
+        println("\t//WARNING Function doesn't end with JMP or RET, possible analysis error.");
+        return false;
+    }
+
     return true;
 }
 
 std::unordered_set<std::string> instMissing;
+std::unordered_map<size_t, size_t> wrongAnalyse;
+
 bool Recompiler::Recompile(const Function& fn)
 {
     auto base = fn.base;
@@ -2931,18 +2987,28 @@ bool Recompiler::Recompile(const Function& fn)
         RecompilerLocalVariables localvariables;
         CSRState csrState = CSRState::Unknown;
 
-        // Recompile instruction
-        if (!Recompile(fn, base, ins, data, switchTable, localvariables, csrState))
+
+        bool isLastInst = base + insn.length >= fn.base + fn.size;
+        //Recompile instruction
+        if (!Recompile(fn, base, ins, data, switchTable, localvariables, csrState, isLastInst))
         {
-            if (instMissing.count(ZydisMnemonicGetString(insn.mnemonic)) == 0)
+            if (!isLastInst)
             {
-                instMissing.insert(ZydisMnemonicGetString(insn.mnemonic));
+                if (instMissing.count(ZydisMnemonicGetString(insn.mnemonic)) == 0)
+                {
+                    instMissing.insert(ZydisMnemonicGetString(insn.mnemonic));
+                }
+                fmt::println("Unrecognized instruction at 0x{:X}: {}", base, ZydisMnemonicGetString(insn.mnemonic));
             }
-            fmt::println("Unrecognized instruction at 0x{:X}: {}", base, ZydisMnemonicGetString(insn.mnemonic));
+            else
+            {
+                wrongAnalyse.insert({ fn.base, base });
+            }
 
 
             allRecompiled = false;
         }
+
 
         base += insn.length;
     }
@@ -3070,12 +3136,34 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
 
     if (instMissing.size() > 0)
     {
-        printf("missing following instructions:\n");
+        printf("\nmissing following instructions:\n");
     }
+
+    static int countJmp = 0;
     for (auto s : instMissing)
     {
-        printf("%s\n", s.c_str());
+        if (countJmp >= 2)
+        {
+            printf("%s\n", s.c_str());
+            countJmp = 0;
+        }
+        else
+        {
+            printf("%s, ", s.c_str());
+            countJmp++;
+        }
     }
+
+    if (wrongAnalyse.size() > 0)
+    {
+        printf("\npotential wrong analyse:\n");
+    }
+
+    for (const auto& pair : wrongAnalyse) 
+    {
+        std::cout << "Base: 0x" << std::hex << pair.first << ", Address: 0x" << pair.second << std::endl;
+    }
+
     SaveCurrentOutData();
 }
 

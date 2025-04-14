@@ -64,7 +64,7 @@ struct Recompiler
         const uint8_t* data,
         std::unordered_map<uint32_t, RecompilerSwitchTable>::iterator& switchTable,
         RecompilerLocalVariables& localVariables,
-        CSRState& csrState);
+        CSRState& csrState, bool isLastInst);
 
     bool Recompile(const Function& fn);
 

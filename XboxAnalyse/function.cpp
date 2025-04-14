@@ -178,8 +178,8 @@ void Function::VfTableAnalyze(const void* code, size_t size, size_t base, Sectio
 //Blocks are sequences of instructions with a single entry and exit point.
 //Branches are instructions that change the flow of execution.
 //Analyse works in two steps: we collect branch target to avoid missing blocks, and then we process blocks.
-Function Function::Analyze(const void* code, size_t size, size_t base, std::unordered_map<uint32_t, RecompilerSwitchTable>& switchTable)
-{
+Function Function::Analyze(const void* code, size_t end, size_t base, std::unordered_map<uint32_t, RecompilerSwitchTable>& switchTable)
+{   
     Function fn{ base, 0 };
 
     const auto* dataStart = static_cast<const uint8_t*>(code);
@@ -188,8 +188,10 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
 
     //First pass: Collect all branch targets
     std::unordered_set<size_t> branchTargets;
+    bool hadCC = false;
+    bool wasRet = false;
 
-    for (size_t addr = base; addr < size; )
+    for (size_t addr = base; addr < end; )
     {
         //failsafe in case we leave function boundaries
         if (addr > base + 0x1700)
@@ -197,20 +199,40 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
 
         size_t offset = addr - base;
 
-        if (offset >= size)
+        if (offset >= end)
             break;
 
-        auto startDecoding = std::chrono::high_resolution_clock::now();
         ZydisDecodedInstruction insn;
         ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, dataStart + offset, size - offset, &insn, operands)))
+
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, dataStart + offset, end - offset, &insn, operands)))
         {
             addr++;
             continue;
         }
 
         if (insn.mnemonic == ZYDIS_MNEMONIC_INT3)
+        {
+            //check if CC isn't just align mid function (because yes that's a thing >.>)
+            if (addr < end - 16 && wasRet == false)
+            {
+                addr++;
+                hadCC = true;
+                continue;
+            }
+
             break;
+        }
+
+        if (insn.mnemonic == ZYDIS_MNEMONIC_RET)
+        {
+            wasRet = true;
+        }
+        else
+        {
+            wasRet = false;
+        }
+          
 
         // Check for control flow instructions and record targets
         if (IsControlFlow(insn.mnemonic))
@@ -235,7 +257,7 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
                                 {
                                     // Add all targets from the jump table
                                     auto label = it->second.labels[i];
-                                    if (label >= fn.base || label < base + size)
+                                    if (label >= fn.base || label < base + end)
                                     {
                                         branchTargets.insert(label);
                                     }
@@ -291,19 +313,20 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
         size_t addr = blockStart;
         fn.blocks.emplace_back(blockStart, 0);
         auto& curBlock = fn.blocks.back();
+  
 
-
-        while (addr < size)
+        while (addr < end)
         {
             size_t offset = addr - base;
 
-            if (offset >= size)
+
+            if (offset >= end)
                 break;
 
             ZydisDecodedInstruction insn;
             ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
 
-            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, dataStart + offset, size - offset, &insn, operands)))
+            if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, dataStart + offset, end - offset, &insn, operands)))
                 break;
 
             //Split if current address is a branch target (not block start)
@@ -335,7 +358,7 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
                     {
                         for (size_t target : it->second.labels)
                         {
-                            if (target >= base && target < base + size) {
+                            if (target >= base && target < base + end) {
                                 worklist.push(target);
                             }
                         }
@@ -351,7 +374,7 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
                             size_t target = addr + insn.length + operands[0].imm.value.s;
                             cfgEdges[addr].push_back(target);
 
-                            if (target < base || target >= size) 
+                            if (target < base || target >= end) 
                             {
                                 fn.blocks.emplace_back(target, 0);
                                 break;
@@ -416,16 +439,32 @@ Function Function::Analyze(const void* code, size_t size, size_t base, std::unor
     }
 
 
+    //sometimes there are instruction between a jmp and a branch, those are skipped which make the function size wrong, so we need to adjust the size to fix that.
+    for (size_t i = 1; i < fn.blocks.size(); ++i) 
+    {
+        size_t prev_end = fn.blocks[i - 1].base + fn.blocks[i - 1].size;
+        if (fn.blocks[i].base > prev_end) //if a gap is found, adjust size
+        {
+            const auto offset = (fn.blocks[i].base - prev_end);
+            if (offset < 16 && fn.base + fn.size + offset <= end)
+                fn.size += offset;
+        }
+    }
+
+    //final adjust by checking block size difference
     const Block& last_block = fn.blocks.back();
     const size_t potentialEndAddress = (last_block.base + last_block.size);
     size_t calculated_size = potentialEndAddress - fn.base;
-    if (potentialEndAddress < size && fn.size < calculated_size)
-
+    if (potentialEndAddress < end && fn.size < calculated_size)
     {
         if (calculated_size - fn.size > 5)
             printf("\nFunction 0x%08X, size: 0x%zX, expected: 0x%zX.\nSize adjusted, new end address: 0x%08X\n", fn.base, fn.size, calculated_size, potentialEndAddress);
         fn.size = potentialEndAddress - fn.base;
     }
 
+    if (hadCC)
+    {
+        fn.size = fn.size;
+    }
     return fn;
 }
