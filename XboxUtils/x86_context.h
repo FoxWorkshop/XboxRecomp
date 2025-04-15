@@ -88,7 +88,7 @@ struct X86Register {
         int32_t i32;
         struct {
             uint16_t u16;
-            int16_t i16;
+            int16_t i16; 
         };
         struct {
             uint8_t u8_lo;
@@ -397,7 +397,7 @@ struct X86Context
     uint32_t fs_base = 0; //Base address for FS segment
     uint16_t gs = 0;  //Additional Segment
 
-    uint8_t* teb_ptr; //Thread Environment Block pointer (for FS segment)
+    uint8_t* kpcr_ptr; //FS Segment (Xbox kernel)
 
     // Flags Register
     X86EFlags eflags;

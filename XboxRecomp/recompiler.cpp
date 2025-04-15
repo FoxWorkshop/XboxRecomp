@@ -1015,10 +1015,6 @@ bool Recompiler::Recompile(
 
     println("\t// {}", buffer);
 
-    if (base == 0x37F737)
-    {
-        printf("welp\n");
-    }
 
     //println("\t// {} {}", , insn.op_str);
 
@@ -1212,56 +1208,68 @@ bool Recompiler::Recompile(
             }
         };
 
-    auto HandleFsValue = [&](uint8_t offset, std::string reg, bool is_write = false) {
-        std::string teb_access = fmt::format("*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x{:X})", offset);
+    auto HandleFsValue = [&](uint8_t offset, std::string reg, bool is_write = false) 
+        {
+
+        std::string kpcr_access = fmt::format("*reinterpret_cast<uint32_t*>(ctx.kpcr_ptr + 0x{:X})", offset);
+
 
         switch (offset) {
-        case 0x00:  // SEH Chain Head
+        case 0x00:  // NT_TIB.ExceptionList (SEH Chain)
             if (is_write) {
-                println("\t{} = {};  // Update SEH Chain Head (FS:[0x00])", teb_access, reg);
+                println("\t{} = {};  //Update SEH Chain Head (FS:[0x00])", kpcr_access, reg);
             }
             else {
-                println("\t{} = {};  // Read SEH Chain Head (FS:[0x00])", reg, teb_access);
+                println("\t{} = {};  //Read SEH Chain Head (FS:[0x00])", reg, kpcr_access);
             }
             break;
-        case 0x20:  // Thread ID
-            if (is_write) {
-                println("\t{} = {};  // WARNING: Writing to Thread ID (FS:[0x20])", teb_access, reg);
+        case 0x04:  // FS:[4] = TLS mid array pointer
+            if (is_write) 
+            {
+                println("\t{} = reinterpret_cast<uint8_t*>({});", kpcr_access, reg);
             }
             else {
-                println("\t{} = {};  // Read Thread ID (FS:[0x20])", reg, teb_access);
+                println("\t{} = reinterpret_cast<uint32_t>({});", kpcr_access, reg);
             }
             break;
-        case 0x24:  // Thread Flags
+        case 0x1C:  // NT_TIB.Self 
             if (is_write) {
-                println("\t{} = {};  // WARNING: Writing to Thread Flags (FS:[0x24])", teb_access, reg);
+                println("\t{} = {};  //Write to Self pointer (FS:[0x18])", kpcr_access, reg);
             }
             else {
-                println("\t{} = {};  // Read Thread Flags (FS:[0x24])", reg, teb_access);
+                println("\t{} = {};  //Read Self pointer (FS:[0x18])", reg, kpcr_access);
             }
             break;
-        case 0x28:  // RPC Handle
+        case 0x20:  // KPCR->Prcb (KPRCB pointer)
             if (is_write) {
-                println("\t{} = {};  // WARNING: Writing to RPC Handle (FS:[0x28])", teb_access, reg);
+                println("\t{} = {};  //Write to Prcb (FS:[0x20])", kpcr_access, reg);
             }
             else {
-                println("\t{} = {};  // Read RPC Handle (FS:[0x28])", reg, teb_access);
+                println("\t{} = {};  // Read Prcb (FS:[0x20])", reg, kpcr_access);
             }
             break;
-        case 0x2C:  // TLS Array Base
+        case 0x24: 
             if (is_write) {
-                println("\t{} = {};  // WARNING: Writing to TLS Array (FS:[0x2C])", teb_access, reg);
+                println("\t{} = {};  //write to Irql (FS:[0x24])", kpcr_access, reg);
             }
             else {
-                println("\t{} = {};  // Read TLS Array (FS:[0x2C])", reg, teb_access);
+                println("\t{} = {};  //read Irql (FS:[0x24])", reg, kpcr_access);
+            }
+            break;
+        case 0x28:  // KPCR->PrcbData (embedded KPRCB)
+            if (is_write) {
+                println("\t{} = {};  // WARNING: Writing to PrcbData (FS:[0x28])", kpcr_access, reg);
+            }
+            else {
+                println("\t{} = {};  // Read PrcbData (FS:[0x28])", reg, kpcr_access);
             }
             break;
         default:
             if (is_write) {
-                println("\t{} = {};  // WARNING: Unknown FS write at offset 0x{:X}", teb_access, reg, offset);
+                println("\t{} = {};  // WARNING: Unknown KPCR write at offset 0x{:X}", kpcr_access, reg, offset);
             }
             else {
-                println("\t{} = 0;  // Unknown FS read at offset 0x{:X}", reg, offset);
+                println("\t{} = 0;  // Unknown KPCR read at offset 0x{:X}", reg, offset);
             }
             break;
         }
@@ -1486,6 +1494,19 @@ bool Recompiler::Recompile(
 
             if (!src_str.empty())
             {
+                //handle special case with TLS_INDEX
+                /**if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER && src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                {
+                    uint32_t abs_addr = static_cast<uint32_t>(src.mem.disp.value);
+
+                    // This is the special TLS index case
+                    if (abs_addr == config.tls_indexAddress)
+                    {
+                        println("\t{} = (int32_t)X86_LOAD_{}(0x{:08X});", dst_str, size_suffix, abs_addr);
+                        break;
+                    }
+                }*/
+
                 // Special case for memory destinations
                 if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
@@ -1625,7 +1646,7 @@ bool Recompiler::Recompile(
                 else
                 {
                     // Indirect call (memory operand)
-                    println("\tX86_CALL_INDIRECT_FUNC({});", ea(insn.operands[0]));
+                    println("\tX86_CALL_INDIRECT_FUNC({}));", "*(uint32_t*)(base + " + ea(insn.operands[0]));
                 }
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
@@ -2607,12 +2628,12 @@ bool Recompiler::Recompile(
 
                 switch (offset)
                 {
-                case 0x24:  // Thread Flags (byte access)
-                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x24));",
+                case 0x24: 
+                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.kpcr_ptr + 0x24));",
                         dst_reg);
                     break;
                 case 0x28:  // RPC Handle (byte access)
-                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.teb_ptr + 0x28));",
+                    println("\t{} = static_cast<uint8_t>(*reinterpret_cast<uint32_t*>(ctx.kpcr_ptr + 0x28));",
                         dst_reg);
                     break;
                 default:
@@ -3159,7 +3180,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
         printf("\npotential wrong analyse:\n");
     }
 
-    for (const auto& pair : wrongAnalyse) 
+    for (const auto& pair : wrongAnalyse)
     {
         std::cout << "Base: 0x" << std::hex << pair.first << ", Address: 0x" << pair.second << std::endl;
     }
