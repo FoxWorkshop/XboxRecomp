@@ -264,18 +264,26 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) >> 4) & AF;
     }
 
-    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result) {
+    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result) 
+    {
         clear_compare_flags();
 
-        // Carry Flag (unsigned underflow)
+        //Special case: SUB X,0 is identical to TEST X,X (only affects SF/ZF/PF)
+        if (rhs == 0) {
+            value |= (result == 0) ? ZF : 0;
+            value |= (result >> 31) & SF;
+
+            uint8_t lsb = result & 0xFF;
+            value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+            return;  // Skip CF/OF/AF for this case!
+        }
+
+        // Normal subtraction
         value |= (lhs < rhs) ? CF : 0;
         value |= (result == 0) ? ZF : 0;
         value |= (result >> 31) & SF;
-
-        // Overflow Flag (signed underflow)
         value |= ((lhs ^ rhs) & (lhs ^ result) >> 31) & OF;
 
-        //Parity/Adjust same as ADD
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
         value |= ((lhs ^ rhs ^ result) >> 4) & AF;
@@ -325,6 +333,148 @@ struct X86EFlags
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
         value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+    }
+
+    void update_flags_neg(uint32_t original_value, uint32_t result)
+    {
+        clear_compare_flags();
+
+        // CF set if original != 0 (special NEG behavior)
+        value |= (original_value != 0) ? CF : 0;
+
+        // OF set if original was 0x80000000 (signed overflow)
+        value |= (original_value == 0x80000000) ? OF : 0;
+
+        // Standard flags
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 31) & SF;
+
+        // AF/PF
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((original_value ^ result) >> 4) & AF;
+    }
+
+    // Updates flags after SHL (Shift Left)
+    void update_flags_shl(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+        clear_compare_flags();
+
+        // CF = Last bit shifted out (MSB before shift)
+        if (shift_count > 0) {
+            uint32_t last_shifted_out = (value_before >> (32 - shift_count)) & 1;
+            value |= (last_shifted_out) ? CF : 0;
+        }
+
+        // OF = Set if sign bit changed (only for 1-bit shifts)
+        if (shift_count == 1) {
+            bool sign_before = (value_before >> 31) & 1;
+            bool sign_after = (result >> 31) & 1;
+            value |= (sign_before != sign_after) ? OF : 0;
+        }
+
+        // SF = MSB of result
+        value |= (result >> 31) & SF;
+
+        // ZF = Result is zero
+        value |= (result == 0) ? ZF : 0;
+
+        // PF = Parity of LSB
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+    }
+
+    // Updates flags after SHR (Shift Right)
+    void update_flags_shr(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+        clear_compare_flags();
+
+        // CF = Last bit shifted out (LSB before shift)
+        if (shift_count > 0) {
+            uint32_t last_shifted_out = (value_before >> (shift_count - 1)) & 1;
+            value |= (last_shifted_out) ? CF : 0;
+        }
+
+        // OF = Undefined for multi-bit shifts (but some CPUs leave it unchanged)
+        // For 1-bit shifts, OF = old MSB (Intel manual says undefined, but some CPUs set it)
+        if (shift_count == 1) {
+            bool msb_before = (value_before >> 31) & 1;
+            value |= msb_before ? OF : 0;
+        }
+
+        // SF = MSB of result
+        value |= (result >> 31) & SF;
+
+        // ZF = Result is zero
+        value |= (result == 0) ? ZF : 0;
+
+        // PF = Parity of LSB
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+    }
+
+
+
+    // Updates flags after SAR (Shift Arithmetic Right)
+    void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+        clear_compare_flags();
+
+        // CF = Last bit shifted out (LSB before shift)
+        if (shift_count > 0) {
+            uint32_t last_shifted_out = (value_before >> (shift_count - 1)) & 1;
+            value |= (last_shifted_out) ? CF : 0;
+        }
+
+        // OF = Cleared for SAR (Intel manual specifies this)
+        value &= ~OF;
+
+        // SF = MSB of result
+        value |= (result >> 31) & SF;
+
+        // ZF = Result is zero
+        value |= (result == 0) ? ZF : 0;
+
+        // PF = Parity of LSB
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0 ? PF : 0);
+    }
+
+    // Updates flags after ROL (Rotate Left)
+    void update_flags_rol(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    {
+        clear_compare_flags();
+
+        //CF = Last bit rotated out (MSB before rotation)
+        if (shift_count > 0) 
+        {
+            uint32_t last_rotated_out = (value_before >> (32 - (shift_count % 32))) & 1;
+            value |= (last_rotated_out) ? CF : 0;
+        }
+
+        //OF = (CF ^ MSB) for 1-bit shifts (undefined otherwise)
+        if (shift_count == 1)
+        {
+            bool new_cf = (value & CF) != 0;
+            bool new_msb = (result >> 31) & 1;
+            value |= (new_cf ^ new_msb) ? OF : 0;
+        }
+    }
+
+    // Updates flags after ROR (Rotate Right)
+    void update_flags_ror(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    {
+        clear_compare_flags();
+
+        // CF = Last bit rotated out (LSB before rotation)
+        if (shift_count > 0) {
+            uint32_t last_rotated_out = (value_before >> ((shift_count % 32) - 1)) & 1;
+            value |= (last_rotated_out) ? CF : 0;
+        }
+
+        // OF = (new MSB ^ new MSB-1) for 1-bit shifts (undefined otherwise)
+        if (shift_count == 1) {
+            bool new_msb = (result >> 31) & 1;
+            bool new_msb_minus_1 = (result >> 30) & 1;
+            value |= (new_msb ^ new_msb_minus_1) ? OF : 0;
+        }
     }
 
     // For STOS/MOVS instructions 
