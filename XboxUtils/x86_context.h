@@ -84,6 +84,7 @@ extern X86FuncMapping X86FuncMappings[];
 
 struct X86Register {
     union {
+        uint64_t u64;
         uint32_t u32;
         int32_t i32;
         struct {
@@ -547,7 +548,8 @@ struct X86Context
     uint32_t fs_base = 0; //Base address for FS segment
     uint16_t gs = 0;  //Additional Segment
 
-    uint8_t* kpcr_ptr; //FS Segment (Xbox kernel)
+    uint32_t kpcr_ptr; //FS Segment (Xbox kernel)
+    uint32_t stack_ptr; //FS Stack Ptr FS: 4
 
     // Flags Register
     X86EFlags eflags;

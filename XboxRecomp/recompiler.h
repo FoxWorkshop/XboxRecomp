@@ -13,6 +13,14 @@ struct RecompilerLocalVariables
     bool flags{};   //EFLAGS register
     bool st[8]{}; //x87 FPU stack registers (ST(0)-ST(7)) - Optional, if x87 is used
     bool temp{};
+    bool fs{};
+};
+
+struct RecompilerFuncConfig
+{
+    bool isFS{};
+    bool isLastInst{};
+    std::string RegisterStackBaseAddr;
 };
 
 enum class CSRState {
@@ -64,7 +72,7 @@ struct Recompiler
         const uint8_t* data,
         std::unordered_map<uint32_t, RecompilerSwitchTable>::iterator& switchTable,
         RecompilerLocalVariables& localVariables,
-        CSRState& csrState, bool isLastInst);
+        CSRState& csrState, RecompilerFuncConfig &funcConfig);
 
     bool Recompile(const Function& fn);
 
