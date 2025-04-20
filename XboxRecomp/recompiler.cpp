@@ -456,17 +456,9 @@ bool isPadding(uint8_t* data, const uint32_t i)
         return false;
 
     bool isValid = false;
-    for (int i = 0; i > -3; i--)
+    for (int j = -1; j > -3; j--)
     {
-        isValid = data[i] == 0xCC;
-    }
-
-    if (isValid == false)
-    {
-        for (int i = 0; i > -3; i--)
-        {
-            isValid = data[i] == 0x90;
-        }
+        isValid = data[i + j] == 0xCC;
     }
 
     return isValid;
@@ -701,7 +693,6 @@ void Recompiler::Analyse()
             //Check for call instructions
             const bool isCall = instruction.mnemonic == ZYDIS_MNEMONIC_CALL;
             auto nextData = headerSectionData + instruction.length;
-            const bool isRet = nextData[0] == 0xC3 || nextData[0] == 0xC2;
 
             if (isCall)
             {
@@ -767,9 +758,6 @@ void Recompiler::Analyse()
                     continue;
                 }
             }
-
-            /** if (isRet == false)
-                 CheckForFunctionPtrRef(outfileFuncPush, decoder, instruction, operands, duplicateCheck, funcsTable, section, image);*/
 
             CheckForVftableRef(instruction, operands, duplicateCheck, vftablesRef, image);
 
@@ -1308,6 +1296,7 @@ bool Recompiler::Recompile(
                 else {
                     // Call the function directly
                     println("\t{}(ctx, base);", targetSymbol->name);
+                    return 1;  
                 }
             }
             else {
@@ -1315,6 +1304,7 @@ bool Recompiler::Recompile(
                 println("\t// ERROR: Unknown function at 0x{:X}", address);
             }
 
+            return 0;
         };
 
 
@@ -1749,6 +1739,8 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CALL:
+    {
+
         println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
         if (insn.insn.operand_count >= 1)
         {
@@ -1756,7 +1748,9 @@ bool Recompiler::Recompile(
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
             {
                 uint32_t targetAddress = base + insn.insn.length + insn.operands[0].imm.value.s;
-                printFunctionCallAddr(targetAddress);
+                int res = printFunctionCallAddr(targetAddress);
+                if (!res)
+                    println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
@@ -1765,7 +1759,9 @@ bool Recompiler::Recompile(
                 const auto callDst = ResolveKernelCall(targetAddress);
                 if (callDst)
                 {
-                    printFunctionCallAddr(targetAddress);
+                    int res = printFunctionCallAddr(targetAddress);
+                    if (!res)
+                        println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
                 }
                 else
                 {
@@ -1779,6 +1775,7 @@ bool Recompiler::Recompile(
                 println("\tX86_CALL_INDIRECT_FUNC({});", get_x86_reg(insn.operands[0].reg.value));
             }
         }
+    }
         break;
     case ZYDIS_MNEMONIC_CDQ:
         println("\tctx.edx.u32 = (ctx.eax.i32 >> 31) * 0xFFFFFFFFu;");
@@ -3359,6 +3356,29 @@ bool Recompiler::Recompile(
             //SETNZ byte [mem]
             println("\tX86_STORE_U8({}, (ctx.eflags.value & X86EFlags::ZF) ? 0 : 1);",
                 ea(insn.operands[0]));
+        }
+        break;
+    case ZYDIS_MNEMONIC_SETNL:
+        if (insn.insn.operand_count >= 1)
+        {
+            const auto& op = insn.operands[0];
+            const char* condition = "(ctx.eflags.value & (X86EFlags::SF | X86EFlags::OF)) == 0 || "
+                "(ctx.eflags.value & (X86EFlags::SF | X86EFlags::OF)) == (X86EFlags::SF | X86EFlags::OF)";
+
+            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                // SETNL reg (explicit uint8_t)
+                println("\t{} = static_cast<uint8_t>({} ? 1 : 0);", get_x86_reg(op.reg.value), condition);
+            }
+            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                // SETNL [mem]
+                println("\tX86_STORE_U8({}, static_cast<uint8_t>({} ? 1 : 0));", ea(op), condition);
+            }
+            else
+            {
+                println("\t//ERROR Setnl variation not handled!");
+            }
         }
         break;
     case ZYDIS_MNEMONIC_SETNS:
