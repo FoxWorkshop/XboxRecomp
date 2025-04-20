@@ -779,7 +779,7 @@ void Recompiler::Analyse()
     {
         bool isCode = (section.flags & SectionFlags_Code);
 
-        if (!isCode)
+        if (!isCode || section.name != ".text")
             continue;
 
         uint8_t* data = section.data;
@@ -828,6 +828,7 @@ void Recompiler::Analyse()
     {
         for (const auto& section : image.sections)
         {
+            
             bool isCode = (section.flags & SectionFlags_Code);
 
             if (!isCode)
@@ -836,10 +837,6 @@ void Recompiler::Analyse()
             auto funcPtr = funcsTable[i];
             if (funcPtr >= section.base && funcPtr < section.base + section.size && image.symbols.find(funcPtr) == image.symbols.end())
             {
-                if (funcPtr == 0xfeb30)
-                {
-                    printf("let's see\n");
-                }
                 auto code = section.data + (funcPtr - section.base);
                 auto max = section.base + section.size - funcPtr;
                 auto potentialEnd = max;
