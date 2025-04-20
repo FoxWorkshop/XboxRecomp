@@ -186,11 +186,64 @@ Function Function::Analyze(const void* code, size_t end, size_t base, std::unord
     ZydisDecoder decoder;
     ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
 
-    //First pass: Collect all branch targets
-    std::unordered_set<size_t> branchTargets;
-    bool hadCC = false;
-    bool wasRet = false;
+    //first pass, check if the guessed function size is accurate, adjust if possible
+    //note: this will make the analyse of already accurate functions length goes further than usual
+    //however since we collect blocks on the second pass this isn't a problem, the size calc will fix it.
 
+    size_t curAddr = base;
+    int adjust = 0;
+    bool worth = false;
+    while (curAddr < end)
+    {
+
+        if (curAddr > base + 0x2000)
+            break;
+
+        size_t offset = curAddr - base;
+
+        if (offset >= end)
+            break;
+
+        ZydisDecodedInstruction insn;
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, dataStart + offset, end - offset, &insn, operands)))
+            break;
+
+        bool isCC = insn.mnemonic == ZYDIS_MNEMONIC_INT3;
+        
+        if (curAddr + insn.length >= end)
+        {
+            if (insn.mnemonic != ZYDIS_MNEMONIC_RET && !isCC && insn.mnemonic != ZYDIS_MNEMONIC_JMP)
+            {
+                if (end - fn.base < 15)
+                {
+                    worth = true;
+                }
+                end += insn.length; 
+                adjust = end;
+            }
+            else
+            {
+                if (adjust)
+                {
+                    end += insn.length;
+                    if (worth)
+                    {
+                        base = base;
+                        end = end;
+                    }
+                    break;
+                }
+            }
+        }
+
+        curAddr += insn.length;
+    }
+
+    //Second pass: Collect all branch targets
+    std::unordered_set<size_t> branchTargets;
+    bool wasRet = false;
     for (size_t addr = base; addr < end; )
     {
         //failsafe in case we leave function boundaries
@@ -217,7 +270,6 @@ Function Function::Analyze(const void* code, size_t end, size_t base, std::unord
             if (addr < end - 16 && wasRet == false)
             {
                 addr++;
-                hadCC = true;
                 continue;
             }
 
@@ -294,7 +346,7 @@ Function Function::Analyze(const void* code, size_t end, size_t base, std::unord
 
     bool isCC = false;
 
-     //Second pass: Process blocks using worklist, splitting at targets and control flow
+     //third and final pass: Process blocks using worklist, splitting at targets and control flow
     std::unordered_map<size_t, std::vector<size_t>> cfgEdges;
     std::unordered_set<size_t> visited;
     std::queue<size_t> worklist;
@@ -341,7 +393,6 @@ Function Function::Analyze(const void* code, size_t end, size_t base, std::unord
             bool isControlFlow = false;
             //Check for control flow instructions
 
-            isCC = insn.mnemonic == ZYDIS_MNEMONIC_INT3;
             if (insn.mnemonic == ZYDIS_MNEMONIC_RET || isCC)
             {
                 break; //End of block
@@ -462,9 +513,5 @@ Function Function::Analyze(const void* code, size_t end, size_t base, std::unord
         fn.size = potentialEndAddress - fn.base;
     }
 
-    if (hadCC)
-    {
-        fn.size = fn.size;
-    }
     return fn;
 }

@@ -334,84 +334,6 @@ bool IsSuspiciousAddress(uint32_t address) {
     return false;
 }
 
-void CheckForFunctionPtrRef(std::ofstream& outfileFunc, ZydisDecoder decoder, ZydisDecodedInstruction instruction, ZydisDecodedOperand_* operands, std::unordered_set<size_t>& duplicateCheck, std::vector<size_t>& extraFuncPtr, Section section, const Image& image)
-{
-    //we don't check for push instruction because it's too generic and grab a lot of false positive
-    //it also only get SEH type function (at least for Shadow) so it's not really worth
-    bool isMov = instruction.mnemonic == ZYDIS_MNEMONIC_MOV;
-    bool isLea = instruction.mnemonic == ZYDIS_MNEMONIC_LEA;
-
-    if (isMov || isLea)
-    {
-        uint32_t function_address = 0;
-
-        if (isLea)
-        {
-            if (instruction.operand_count >= 2 &&
-                operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
-            {
-                //Case 1: Direct function address loading (lea reg, offset)
-                if (operands[1].mem.base == ZYDIS_REGISTER_NONE &&
-                    operands[1].mem.index == ZYDIS_REGISTER_NONE)
-                {
-                    function_address = static_cast<uint32_t>(operands[1].mem.disp.value);
-                }
-                else if (operands[1].mem.index != ZYDIS_REGISTER_NONE && operands[1].mem.scale == 4)
-                {
-                    //Case 2: Indexed memory access (lea reg, [base + index*scale + disp])
-                    function_address = static_cast<uint32_t>(operands[1].mem.disp.value);
-                }
-            }
-        }
-
-        if (isMov)
-        {
-            // Handle `mov reg, offset <function>`
-            if (instruction.operand_count >= 2 &&
-                operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                function_address = static_cast<uint32_t>(operands[1].imm.value.u);
-            }
-
-            // Handle `mov [mem], offset <function>`
-            if (instruction.operand_count >= 2 &&
-                operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                function_address = static_cast<uint32_t>(operands[1].imm.value.u);
-            }
-
-            // MOV Case 3: Indexed Memory Access (mov [base + index*scale], function)
-            if (instruction.operand_count >= 2 && operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY && operands[1].type != ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                if (operands[0].mem.index != ZYDIS_REGISTER_NONE && operands[0].mem.scale == 4)
-                {
-                    function_address = static_cast<uint32_t>(operands[0].mem.disp.value);
-                }
-            }
-        }
-
-        if (function_address < image.base || function_address >= endHeader || !isCodeSection(function_address, image.sections) || IsSuspiciousAddress(function_address))
-            return;
-
-        auto code = section.data + (function_address - section.base);
-        auto size = section.base + section.size - function_address;
-
-        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, code, size, &instruction, operands)))
-        {
-            function_address = function_address;
-            return;
-        }
-
-
-        if (duplicateCheck.count(function_address) == 0)
-        {
-            extraFuncPtr.push_back(function_address);
-            outfileFunc << std::hex << function_address << std::endl;
-            duplicateCheck.insert(function_address);
-        }
-    }
-}
 
 bool isNextBytesRet(uint8_t* data)
 {
@@ -624,6 +546,44 @@ void ProcessEntryPoint(const Image& image, const Section section, std::vector<si
     }
 }
 
+void remove_overlapping_functions(std::vector<Function>& functions) 
+{      
+    if (functions.empty()) 
+        return;
+ 
+
+    for (auto it = functions.begin(); it != functions.end(); ) 
+    {
+        // Find the next function that doesn't completely overlap with this one
+        auto next_it = std::next(it);
+        if (next_it == functions.end()) 
+            break;
+
+        const size_t current_end = it->base + it->size;
+        const size_t next_end = next_it->base + next_it->size;
+
+        // Check if functions overlap
+        if (next_it->base < current_end) 
+        {
+            // They overlap - keep the larger one
+            if (it->size >= next_it->size) 
+            {
+                // Current function is larger or equal - remove next
+                next_it = functions.erase(next_it);
+            }
+            else 
+            {
+                // Next function is larger - merge and remove next one
+                it->size = (next_it->base + next_it->size) - it->base;
+                next_it = functions.erase(next_it);
+            }
+        }
+        else {
+            // No overlap - move to next
+            ++it;
+        }
+    }
+}
 
 void Recompiler::Analyse()
 {
@@ -645,15 +605,6 @@ void Recompiler::Analyse()
 
     std::unordered_set<size_t> duplicateCheck;
     std::vector<size_t> vftablesRef, funcArrayRef, funcsTable; //used to detect virtual function, array of function pointer and functions from "push" and "mov" instruction
-
-
-    // Process manual functions from config (if any)
-    for (auto& [address, size] : config.functions)
-    {
-        functions.emplace_back(address, size);
-        image.symbols.emplace(fmt::format("sub_{:X}", address), address, size, Symbol_Function);
-        duplicateCheck.insert(address);
-    }
 
 
     ProcessEntryPoint(image, text, funcsTable, duplicateCheck);
@@ -843,6 +794,8 @@ void Recompiler::Analyse()
 
                 if (i + 1 < funcsTable.size())
                     potentialEnd = (funcsTable[i + 1] - funcPtr) + funcPtr;
+                else
+                    potentialEnd = section.base + section.size; //if last function of the list, put size of the image as maximum length
 
                 bool banned = isAddressRangeBanned(&config.bannedAddresses, funcPtr);
 
@@ -855,21 +808,50 @@ void Recompiler::Analyse()
                     continue;
                 }
 
-                auto& fn = functions.emplace_back(Function::Analyze(code, potentialEnd, funcPtr, config.switchTables));
-                image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
+                functions.emplace_back(Function::Analyze(code, potentialEnd, funcPtr, config.switchTables));
+           
             }
         }
 
     }
 
     std::sort(functions.begin(), functions.end(), [](auto& lhs, auto& rhs) { return lhs.base < rhs.base; });
-    //std::sort(globalJumps.begin(), globalJumps.end(), [](auto& lhs, auto& rhs) { return lhs.instAddr < rhs.instAddr; });
-
     functions.erase(std::unique(functions.begin(), functions.end()), functions.end());
+    //std::sort(globalJumps.begin(), globalJumps.end(), [](auto& lhs, auto& rhs) { return lhs.instAddr < rhs.instAddr; });
+    remove_overlapping_functions(functions);
+
+
+    // Process manual functions from config (if any)
+    for (auto& [address, size] : config.functions)
+    {
+        for (auto it = functions.begin(); it != functions.end(); )
+        {
+            auto funcEnd = it->base + it->size;
+
+            if (address == it->base || (funcEnd > address && funcEnd <= address + size))
+            {
+                it = functions.erase(it); // erase and assign returned iterator to `it`
+            }
+            else
+            {
+                ++it; // manually advance if not erasing
+            }
+        }
+
+        functions.emplace_back(address, size);
+    }
+
+
+
     printf("Analysed %d functions.\n", functions.size());
 
     for (auto& fn : functions)
     {
+        if (fn.base == 0xE7D10)
+        {
+            printf("wtf\n");
+        }
+        image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
         outfileFunc << std::hex << fn.base << std::endl;
     }
 
@@ -3708,10 +3690,10 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
         SaveCurrentOutData("x86_func_mapping.cpp");
     }
 
-    int count = 0;
+
     for (size_t i = 0; i < functions.size(); i++)
     {
-        if ((i % 256) == 0)
+        if (i > 0 && (i % 256) == 0)
         {
             SaveCurrentOutData();
             println("#include \"x86_recomp_shared.h\"\n");
@@ -3720,10 +3702,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
         if ((i % 60) == 0 || (i == (functions.size() - 1)))
             fmt::println("Recompiling functions... {}%", static_cast<float>(i + 1) / functions.size() * 100.0f);
 
-        if (functions[i].base >= 0x80000000)
-        {
-            printf("hi\n");
-        }
+
 
         Recompile(functions[i]);
     }
