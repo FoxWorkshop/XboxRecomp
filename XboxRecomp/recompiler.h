@@ -4,7 +4,16 @@
 #include "recompiler_config.h"
 #include "Zydis/DecoderTypes.h"
 #include <functional>
+#include <algorithm>
+#include <iterator>
+#include <util.h>
 
+const static ZydisMnemonic FloatOP[] =
+{
+    ZYDIS_MNEMONIC_FADD, ZYDIS_MNEMONIC_FSUB, ZYDIS_MNEMONIC_FMUL, ZYDIS_MNEMONIC_FDIV,
+    ZYDIS_MNEMONIC_FSIN, ZYDIS_MNEMONIC_FCOMP, ZYDIS_MNEMONIC_FCOM, ZYDIS_MNEMONIC_FCOMPP,
+    ZYDIS_MNEMONIC_FCOS, ZYDIS_MNEMONIC_FSINCOS
+};
 
 struct RecompilerLocalVariables
 {
@@ -14,6 +23,21 @@ struct RecompilerLocalVariables
     bool st[8]{}; //x87 FPU stack registers (ST(0)-ST(7)) - Optional, if x87 is used
     bool temp{};
     bool fs{};
+
+    //temp to avoid variable redundancy 
+    bool valDouble[3]{};
+    bool valUint[2]{};
+
+    bool isFloatOP(const ZydisMnemonic op)
+    {
+        for (int i = 0; i < LengthOfArray(FloatOP); i++)
+        {
+            if (FloatOP[i] == op)
+                return true;
+        }
+
+        return false;
+    }
 };
 
 struct RecompilerFuncConfig

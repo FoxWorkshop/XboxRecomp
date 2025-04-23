@@ -89,7 +89,7 @@ struct X86Register {
         int32_t i32;
         struct {
             uint16_t u16;
-            int16_t i16; 
+            int16_t i16;
         };
         struct {
             uint8_t u8_lo;
@@ -132,11 +132,11 @@ struct X86EFlags
         bool carry = lhs < rhs;  // Unsigned overflow
 
         // Zero Flag
-        if (result == 0) 
+        if (result == 0)
             value |= ZF;
 
         // Sign Flag (MSB of result)
-        if (result & 0x80000000) 
+        if (result & 0x80000000)
             value |= SF;
 
         // Parity Flag (even parity of LSB)
@@ -148,8 +148,9 @@ struct X86EFlags
             value |= CF;
 
         // Overflow Flag (signed overflow)
-        bool overflow = ((lhs ^ rhs) & (lhs ^ result)) & 0x80000000;
-        if (overflow) value |= OF;
+        bool overflow = (((lhs ^ rhs) & (lhs ^ result)) >> 31) != 0;
+        if (overflow)
+            value |= OF;
     }
 
     // Template alias for backward compatibility
@@ -163,6 +164,8 @@ struct X86EFlags
     {
         clear_compare_flags();
 
+        const bool unordered = std::isnan(lhs) || std::isnan(rhs);
+
         // ZF: equal (including unordered)
         if (lhs == rhs || (std::isnan(lhs) || std::isnan(rhs)))
             value |= ZF;
@@ -172,8 +175,8 @@ struct X86EFlags
             value |= SF;
 
         // PF: unordered (either is NaN)
-        if (std::isnan(lhs) || std::isnan(rhs))
-            value |= PF;
+        if (unordered)
+            value |= PF; // Set unordered flag
 
         // OF/CF: cleared for SSE comparisons
         value &= ~(OF | CF);
@@ -219,7 +222,7 @@ struct X86EFlags
         }
     }
 
-  
+
     void update_test_flags(uint32_t result)
     {
         clear_compare_flags();
@@ -233,9 +236,9 @@ struct X86EFlags
     }
 
     //and, or, xor etc.
-    void update_flags_logic(uint32_t result) 
+    void update_flags_logic(uint32_t result)
     {
-        clear_compare_flags(); 
+        clear_compare_flags();
 
         value |= (result == 0) ? ZF : 0;
         value |= (result >> 31) & SF;
@@ -244,7 +247,7 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
-    void update_flags_add(uint32_t lhs, uint32_t rhs, uint32_t result) 
+    void update_flags_add(uint32_t lhs, uint32_t rhs, uint32_t result)
     {
         clear_compare_flags();
 
@@ -265,7 +268,7 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) >> 4) & AF;
     }
 
-    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result) 
+    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result)
     {
         clear_compare_flags();
 
@@ -290,12 +293,12 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) >> 4) & AF;
     }
 
-    void update_flags_mul(bool overflow) 
+    void update_flags_mul(bool overflow)
     {
         clear_compare_flags();
 
-        if (overflow) 
-            value |= (CF | OF);       
+        if (overflow)
+            value |= (CF | OF);
     }
 
     void update_flags_inc(uint32_t old_val, uint32_t result) {
@@ -316,8 +319,8 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0) ? AF : 0;
     }
 
-    void update_flags_dec(uint32_t old_val, uint32_t result) 
-    {     
+    void update_flags_dec(uint32_t old_val, uint32_t result)
+    {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
         clear_compare_flags();
@@ -439,12 +442,12 @@ struct X86EFlags
     }
 
     // Updates flags after ROL (Rotate Left)
-    void update_flags_rol(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    void update_flags_rol(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
         clear_compare_flags();
 
         //CF = Last bit rotated out (MSB before rotation)
-        if (shift_count > 0) 
+        if (shift_count > 0)
         {
             uint32_t last_rotated_out = (value_before >> (32 - (shift_count % 32))) & 1;
             value |= (last_rotated_out) ? CF : 0;
@@ -460,7 +463,7 @@ struct X86EFlags
     }
 
     // Updates flags after ROR (Rotate Right)
-    void update_flags_ror(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    void update_flags_ror(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
         clear_compare_flags();
 
@@ -492,7 +495,7 @@ struct X86EFlags
 
 struct X87FPU
 {
-    double st[8];  //8-register stack (ST0-ST7)
+    long double st[8];  //8-register stack (ST0-ST7)
     uint16_t top = 0; //Stack pointer (0-7)
     uint16_t cw = 0x037F; //Control word (default: round-to-nearest, 64-bit precision)
     uint16_t sw = 0;  //Status word
@@ -504,27 +507,122 @@ struct X87FPU
     };
     uint16_t tw = 0xFFFF; //Tag word (all empty by default)
 
-    void push(double val)
+    void push(long double value) 
     {
-        top = (top - 1) & 7; // Decrement (wraps from 0→7)
-        st[top] = val;
+        top = (top - 1) & 7;  
+
+        if ((tw & (1 << top)) == 0) {
+            sw |= C0 | C1;  
+            if (value != value) 
+            { 
+                sw |= C2;
+            }
+        }
+
+        st[top] = value;
+        tw &= ~(1 << top);  // Mark register as used
     }
 
-    double pop()
+    long double pop() 
     {
-        double val = st[top];
-        top = (top + 1) & 7; // Increment (wraps from 7→0)
+
+        if (tw & (1 << top)) 
+        {
+            sw |= C0 | C1; 
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+
+        long double val = st[top];
+        tw |= (1 << top);   // Mark register as empty
+        top = (top + 1) & 7;
         return val;
     }
 
-    double& st0() { return st[top]; }
-    double& st1() { return st[(top + 1) & 7]; }
-    double& st2() { return st[(top + 2) & 7]; }
-    double& st3() { return st[(top + 3) & 7]; }
-    double& st4() { return st[(top + 4) & 7]; }
-    double& st5() { return st[(top + 5) & 7]; }
-    double& st6() { return st[(top + 6) & 7]; }
-    double& st7() { return st[(top + 7) & 7]; }
+
+    long double& st0() { return st[top]; }
+    long double& st1() { return st[(top + 1) & 7]; }
+    long double& st2() { return st[(top + 2) & 7]; }
+    long double& st3() { return st[(top + 3) & 7]; }
+    long double& st4() { return st[(top + 4) & 7]; }
+    long double& st5() { return st[(top + 5) & 7]; }
+    long double& st6() { return st[(top + 6) & 7]; }
+    long double& st7() { return st[(top + 7) & 7]; }
+
+    void flag_invalid() { sw |= C0 | C2; }  // For NaN/Invalid ops
+    void flag_divzero() { sw |= C0 | C3; }  // For x/0 cases
+    void flag_stackfault() { sw |= C0 | C1; }  // Stack overflow/underflow
+
+    void clear_flags() {
+        sw &= ~(C0 | C1 | C2 | C3);
+    }
+
+    void set_unordered() {
+        sw |= C0 | C2 | C3; // Set for NaN comparisons
+    }
+
+    void set_compare_flags(bool less, bool equal) {
+        clear_flags();
+        if (less) sw |= C0;
+        else if (equal) sw |= C3;
+    }
+
+
+    // In X87FPU struct
+    void set_exception_flags(uint8_t exception_type) 
+    {
+
+        constexpr uint16_t FLAGS_INVALID = C0 | C2;  // For NaN/Invalid ops
+        constexpr uint16_t FLAGS_DIVZERO = C0 | C3;  // For x/0
+        constexpr uint16_t FLAGS_STACK = C0 | C1;  // Stack faults
+
+        switch (exception_type) {
+        case 1:  sw |= FLAGS_INVALID;  break;  // Most common case
+        case 2:  sw |= FLAGS_DIVZERO;  break;  // Common in physics
+        case 3:  sw |= FLAGS_STACK;    break;  // Rare but critical
+        default: sw |= C0;             break;  // Catch-all
+        }
+    }
+
+
+    double round_to_control(double value) const 
+    {
+        const int rounding_mode = (cw >> 10) & 3;
+        const int precision = (cw >> 8) & 3;
+
+        // Apply precision first
+        double result;
+        switch (precision) {
+        case 0: result = (double)(float)value; break; // Single
+        case 2: result = (long double)value; break;    // Extended
+        default: result = value; break;                // Double
+        }
+
+        // Apply rounding
+        switch (rounding_mode) {
+        case 0: return std::nearbyint(result);
+        case 1: return std::floor(result);
+        case 2: return std::ceil(result);
+        case 3: return std::trunc(result);
+        default: return result;
+        }
+    }
+
+    void compare_and_pop(long double rhs, int pops = 0) 
+    {
+        clear_flags();
+
+        if (std::isnan(st0()) || std::isnan(rhs)) {
+            sw |= C0 | C2 | C3;
+        }
+        else if (st0() < rhs) {
+            sw |= C0;
+        }
+        else if (st0() == rhs) {
+            sw |= C3;
+        }
+
+        while (pops--) pop_checked();
+    }
 };
 
 struct X86Context
@@ -545,7 +643,6 @@ struct X86Context
     uint16_t ss = 0;  //Stack Segment
     uint16_t ds = 0;  //Data Segment
     uint16_t fs = 0;  //Additional Segment
-    uint32_t fs_base = 0; //Base address for FS segment
     uint16_t gs = 0;  //Additional Segment
 
     uint32_t kpcr_ptr; //FS Segment (Xbox kernel)
@@ -564,10 +661,30 @@ struct X86Context
     };
     uint32_t mxcsr = 0x1F80;
     X87FPU fpu;
-    // Other State Information (optional)
+
+    // In X86Context struct
+    void set_mxcsr(uint32_t value) 
+    {
+        mxcsr = value & 0xFFC0; // Mask reserved bits
+        _mm_setcsr(mxcsr);
+    }
+
+    uint32_t get_mxcsr() const 
+    {
+        return _mm_getcsr();
+    }
+
+    void handle_sse_exceptions() {
+        uint32_t exceptions = mxcsr & 0x3F;
+        if (exceptions) 
+        {
+            mxcsr &= ~0x3F; // Clear exception flags
+        }
+    }
+
     uint8_t* base; // Base address for memory access
 
-    struct { //technically only used by xbox kernel stuff should't be needed since function will have to be patched
+    struct { //technically only used by xbox kernel stuff should't be needed 
         uint16_t limit;  // GDT size - 1
         uint32_t base;   // Linear address of GDT
     } gdtr = { 0, 0 };     // Initialize to zero
