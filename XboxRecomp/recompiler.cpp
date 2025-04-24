@@ -1789,12 +1789,12 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_CALL:
     {
 
-        println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
         if (insn.insn.operand_count >= 1)
         {
             // Direct call (relative offset)
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
             {
+                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
                 uint32_t targetAddress = base + insn.insn.length + insn.operands[0].imm.value.s;
                 int res = printFunctionCallAddr(targetAddress);
                 if (!res)
@@ -1807,6 +1807,7 @@ bool Recompiler::Recompile(
                 const auto callDst = ResolveKernelCall(targetAddress);
                 if (callDst)
                 {
+                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); 
                     int res = printFunctionCallAddr(targetAddress);
                     if (!res)
                         println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
@@ -1814,13 +1815,17 @@ bool Recompiler::Recompile(
                 else
                 {
                     // Indirect call (memory operand)
-                    println("\tX86_CALL_INDIRECT_FUNC({}));", "*(uint32_t*)(base + " + ea(insn.operands[0]));
+                    println("\tauto ptr_{} = *(uint32_t*)(base + " + ea(insn.operands[0]) + ");", base);
+                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); 
+                    println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
                 }
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
                 // Register indirect (call eax)
-                println("\tX86_CALL_INDIRECT_FUNC({});", get_x86_reg(insn.operands[0].reg.value));
+                println("\tauto ptr_{} = " + get_x86_reg(insn.operands[0].reg.value) + ";", base);
+                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer");
+                println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
             }
         }
     }
