@@ -15,6 +15,11 @@ const static ZydisMnemonic FloatOP[] =
     ZYDIS_MNEMONIC_FCOS, ZYDIS_MNEMONIC_FSINCOS
 };
 
+const static ZydisMnemonic U64OP[] =
+{
+    ZYDIS_MNEMONIC_PUNPCKLDQ, ZYDIS_MNEMONIC_PUNPCKHDQ
+};
+
 struct RecompilerLocalVariables
 {
     bool r[8]{};   //General-purpose registers (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP)
@@ -27,6 +32,18 @@ struct RecompilerLocalVariables
     //temp to avoid variable redundancy 
     bool valDouble[3]{};
     bool valUint[2]{};
+    bool valUint64[2]{};
+
+    bool isUint64OP(const ZydisMnemonic op)
+    {
+        for (int i = 0; i < LengthOfArray(U64OP); i++)
+        {
+            if (U64OP[i] == op)
+                return true;
+        }
+
+        return false;
+    }
 
     bool isFloatOP(const ZydisMnemonic op)
     {

@@ -52,12 +52,37 @@
 #define X86_STORE_F32(addr, value) (*reinterpret_cast<volatile float*>(base + (addr)) = static_cast<float>(value))
 #define X86_STORE_F64(addr, value) (*reinterpret_cast<volatile double*>(base + (addr)) = static_cast<double>(value))
 
-// Safe component access macros
 #define XMM_F32(reg, idx) (ctx.vec[reg].f32[idx])
 #define XMM_U32(reg, idx) (ctx.vec[reg].u32[idx])
 
-#define X86_FS_LOAD(offset) X86_LOAD_U32(ctx.fs_base + (offset))
-#define X86_FS_STORE(offset, value) X86_STORE_U32(ctx.fs_base + (offset), (value))
+// SSE Load Operations
+#define X86_MOVUPS(reg, addr) \ ctx.xmm[reg] = _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
+#define X86_MOVAPS(reg, addr) \ ctx.xmm[reg] = _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
+
+// SSE Store Operations
+#define X86_MOVUPS_STORE(addr, reg) \ _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+#define X86_MOVAPS_STORE(addr, reg) \ _mm_store_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+#define X86_MOVNTPS(addr, reg) \ _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+
+// SSE Register-to-Register Operations
+#define X86_MOVAPS_REG(dest, src) \ ctx.xmm[dest] = ctx.xmm[src]
+#define X86_MOVLHPS(dest, src) \ ctx.xmm[dest] = _mm_movelh_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_MOVHLPS(dest, src) \ ctx.xmm[dest] = _mm_movehl_ps(ctx.xmm[dest], ctx.xmm[src])
+
+//Move Low to High Packed Single-Precision
+#define X86_MOVLHPS(dest, src) \ ctx.xmm[dest] = _mm_movelh_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_MOVHLPS(dest, src) \ ctx.xmm[dest] = _mm_movehl_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_MOVNTPS(addr, reg) \ _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+
+// Additional SSE operations as needed
+#define X86_ADDPS(dest, src) \ ctx.xmm[dest] = _mm_add_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_MULPS(dest, src) \ ctx.xmm[dest] = _mm_mul_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_SHUFPS(dest, src, imm) \ ctx.xmm[dest] = _mm_shuffle_ps(ctx.xmm[dest], ctx.xmm[src], imm)
+
+// MMX Load/Store
+#define X86_MMX_LOAD(addr) (*reinterpret_cast<uint64_t*>(base + (addr)))
+#define X86_MMX_STORE(addr, value) (*reinterpret_cast<uint64_t*>(base + (addr)) = (value))
+#define MMX_REG(reg) (ctx.mmx[(reg) - ZYDIS_REGISTER_MM0])
 
 #ifndef X86_CALL_FUNC
 #define X86_CALL_FUNC(x) x(ctx, base)
@@ -659,6 +684,8 @@ struct X86Context
             uint32_t u32[4]; // Per-lane integer access
         } vec[8];  // Indexed by register number (0-7)
     };
+
+    uint64_t mmx[8];
     uint32_t mxcsr = 0x1F80;
     X87FPU fpu;
 
@@ -727,6 +754,22 @@ inline __m128i X86_AVG_EPU8(__m128i a, __m128i b) {
 inline __m128i X86_AVG_EPU16(__m128i a, __m128i b)
 {
     return _mm_avg_epu16(a, b);
+}
+
+inline uint64_t X86_PSHUFW(uint64_t src, uint8_t control) 
+{
+    const uint16_t w0 = (src >> (0 * 16)) & 0xFFFF;
+    const uint16_t w1 = (src >> (1 * 16)) & 0xFFFF;
+    const uint16_t w2 = (src >> (2 * 16)) & 0xFFFF;
+    const uint16_t w3 = (src >> (3 * 16)) & 0xFFFF;
+
+
+    const uint16_t ws[4] = { w0, w1, w2, w3 };
+
+    return (uint64_t)ws[control & 3] |  // Word 0
+        ((uint64_t)ws[(control >> 2) & 3] << 16) |  // Word 1
+        ((uint64_t)ws[(control >> 4) & 3] << 32) |  // Word 2
+        ((uint64_t)ws[(control >> 6) & 3] << 48);   // Word 3
 }
 
 #endif // X86_CONTEXT_H_INCLUDED
