@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 #include "stdio.h"
 #include "assert.h"
@@ -56,33 +57,46 @@
 #define XMM_U32(reg, idx) (ctx.vec[reg].u32[idx])
 
 // SSE Load Operations
-#define X86_MOVUPS(reg, addr) \ ctx.xmm[reg] = _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
-#define X86_MOVAPS(reg, addr) \ ctx.xmm[reg] = _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
+#define X86_MOVUPS(reg, addr) \
+    ctx.xmm[(reg)] = _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
+
+#define X86_MOVAPS(reg, addr) \
+    ctx.xmm[(reg)] = _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
 
 // SSE Store Operations
-#define X86_MOVUPS_STORE(addr, reg) \ _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
-#define X86_MOVAPS_STORE(addr, reg) \ _mm_store_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
-#define X86_MOVNTPS(addr, reg) \ _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+#define X86_MOVUPS_STORE(addr, reg) \
+    _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
 
-// SSE Register-to-Register Operations
-#define X86_MOVAPS_REG(dest, src) \ ctx.xmm[dest] = ctx.xmm[src]
-#define X86_MOVLHPS(dest, src) \ ctx.xmm[dest] = _mm_movelh_ps(ctx.xmm[dest], ctx.xmm[src])
-#define X86_MOVHLPS(dest, src) \ ctx.xmm[dest] = _mm_movehl_ps(ctx.xmm[dest], ctx.xmm[src])
+#define X86_MOVAPS_STORE(addr, reg) \
+    _mm_store_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
 
-//Move Low to High Packed Single-Precision
-#define X86_MOVLHPS(dest, src) \ ctx.xmm[dest] = _mm_movelh_ps(ctx.xmm[dest], ctx.xmm[src])
-#define X86_MOVHLPS(dest, src) \ ctx.xmm[dest] = _mm_movehl_ps(ctx.xmm[dest], ctx.xmm[src])
-#define X86_MOVNTPS(addr, reg) \ _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[reg])
+#define X86_MOVNTPS(addr, reg) \
+    _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
 
-// Additional SSE operations as needed
-#define X86_ADDPS(dest, src) \ ctx.xmm[dest] = _mm_add_ps(ctx.xmm[dest], ctx.xmm[src])
-#define X86_MULPS(dest, src) \ ctx.xmm[dest] = _mm_mul_ps(ctx.xmm[dest], ctx.xmm[src])
-#define X86_SHUFPS(dest, src, imm) \ ctx.xmm[dest] = _mm_shuffle_ps(ctx.xmm[dest], ctx.xmm[src], imm)
+// Register Operations
+#define X86_MOVAPS_REG(dest, src) \
+    ctx.xmm[(dest)] = ctx.xmm[(src)]
+
+#define X86_MOVLHPS(dest, src) \
+    ctx.xmm[(dest)] = _mm_movelh_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
+
+#define X86_MOVHLPS(dest, src) \
+    ctx.xmm[(dest)] = _mm_movehl_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
+
+// Arithmetic Operations
+#define X86_ADDPS(dest, src) \
+    ctx.xmm[(dest)] = _mm_add_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
+
+#define X86_MULPS(dest, src) \
+    ctx.xmm[(dest)] = _mm_mul_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
+
+#define X86_SHUFPS(dest, src, imm) \
+    ctx.xmm[(dest)] = _mm_shuffle_ps(ctx.xmm[(dest)], ctx.xmm[(src)], (imm))
 
 // MMX Load/Store
 #define X86_MMX_LOAD(addr) (*reinterpret_cast<uint64_t*>(base + (addr)))
 #define X86_MMX_STORE(addr, value) (*reinterpret_cast<uint64_t*>(base + (addr)) = (value))
-#define MMX_REG(reg) (ctx.mmx[(reg) - ZYDIS_REGISTER_MM0])
+#define MMX_REG(reg, offset) (ctx.mmx[(reg) - offset])
 
 #ifndef X86_CALL_FUNC
 #define X86_CALL_FUNC(x) x(ctx, base)
@@ -646,7 +660,7 @@ struct X87FPU
             sw |= C3;
         }
 
-        while (pops--) pop_checked();
+        while (pops--) pop();
     }
 };
 
