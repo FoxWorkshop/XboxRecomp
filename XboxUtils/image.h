@@ -12,6 +12,7 @@ struct Image
     uint32_t size{};
 
     size_t entry_point{};
+    size_t dwsizeofImage{};
     std::set<Section, SectionComparer> sections{};
     SymbolTable symbols{};
 

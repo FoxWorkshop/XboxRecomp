@@ -4097,7 +4097,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
         println("");
 
         println("#define X86_IMAGE_BASE 0x{:X}ull", image.base);
-        println("#define X86_IMAGE_SIZE 0x{:X}ull", image.size);
+        println("#define X86_IMAGE_SIZE 0x{:X}ull", image.dwsizeofImage);
 
         // Extract the address of the minimum code segment to store the function table at.
         size_t codeMin = ~0;

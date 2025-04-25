@@ -123,6 +123,7 @@ Image XbeLoadImage(const uint8_t* data, size_t size)
     image.size = size;
     image.data = std::make_unique<uint8_t[]>(size);
     image.entry_point = decode_entry_point(header->m_entry, size);
+    image.dwsizeofImage = header->sizeOfImage;
     image.base = header->baseAddress;
     memcpy(image.data.get(), data, size);
 
