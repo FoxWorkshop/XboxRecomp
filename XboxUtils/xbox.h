@@ -76,6 +76,15 @@ typedef void_xt(*PKDEFERRED_ROUTINE)
     IN PVOID         SystemArgument2
     );
 
+typedef struct _XLIST_ENTRY
+{
+    uint32_t Flink;
+    uint32_t Blink;
+} XLIST_ENTRY;
+
+struct _XLIST_ENTRY;
+typedef _XLIST_ENTRY XLIST_ENTRY;
+typedef xpointer<XLIST_ENTRY> PXLIST_ENTRY;
 
 typedef struct _KDPC
 {
@@ -94,3 +103,29 @@ typedef struct _KDPC
 }
 KDPC, * PKDPC;
 
+struct TLS
+{
+    uint32_t dwDataStartAddr;             // raw start address
+    uint32_t dwDataEndAddr;               // raw end address
+    uint32_t dwTLSIndexAddr;              // tls index address
+    uint32_t dwTLSCallbackAddr;           // tls callback address
+    uint32_t dwSizeofZeroFill;            // size of zero fill
+    uint32_t dwCharacteristics;           // characteristics
+};
+
+
+
+
+typedef struct _XDISPATCHER_HEADER
+{
+
+    uchar_xt       Type;           // 0x00
+    uchar_xt       Absolute;       // 0x01
+    uchar_xt       Size;           // 0x02
+    uchar_xt       Inserted;       // 0x03
+    long_xt        SignalState;    // 0x04
+    XLIST_ENTRY  WaitListHead;   // 0x08
+
+} XDISPATCHER_HEADER, * XPDISPATCHER_HEADER;
+
+typedef XDISPATCHER_HEADER XKEVENT;

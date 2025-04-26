@@ -45,7 +45,6 @@ struct XbeHeader {
 };
 
 
-
 struct XbeSectionHeader {
    
     struct flags 
