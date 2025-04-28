@@ -365,16 +365,22 @@ struct X86EFlags
         clear_compare_flags();
         value |= saved_cf;
 
+        // Zero Flag
         value |= (result == 0) ? ZF : 0;
 
-        value |= (result >> 31) & SF;
+        // Sign Flag - explicitly check the highest bit (bit 31)
+        if (result & 0x80000000) {
+            value |= SF;  // Set SF if bit 31 is set (negative)
+        }
 
         // Overflow Flag (only if 0x80000000 -> 0x7FFFFFFF)
         value |= (old_val == 0x80000000) ? OF : 0;
 
-        //Parity Flag
+        // Parity Flag
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+
+        // Auxiliary Flag
         value |= ((result & 0x0F) == 0x0F) ? AF : 0;
     }
 
