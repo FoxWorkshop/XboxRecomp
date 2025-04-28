@@ -1979,8 +1979,12 @@ bool Recompiler::Recompile(
                 println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
                 uint32_t targetAddress = base + insn.insn.length + insn.operands[0].imm.value.s;
                 int res = printFunctionCallAddr(targetAddress);
+
                 if (!res)
+                {
                     println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
+                    println("\tprintf(\"MISSING FUNCTION CALL: {:X} at {:X}\\n\");", targetAddress, base);
+                }
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
@@ -2051,6 +2055,31 @@ bool Recompiler::Recompile(
             {
 
                 println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)({})));", get_x86_reg(dst.reg.value), ea(src));
+            }
+        }
+        break;
+    case ZYDIS_MNEMONIC_CVTSI2SS:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            // CVTSI2SS xmm, reg32/m32
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\t{} = _mm_cvtsi32_ss({}, {});",
+                    get_x86_reg(dst.reg.value, true),  
+                    get_x86_reg(dst.reg.value, true),  
+                    get_x86_reg(src.reg.value));      
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                println("\t{} = _mm_cvtsi32_ss({}, (int32_t)X86_LOAD_U32({}));",
+                    get_x86_reg(dst.reg.value, true),  
+                    get_x86_reg(dst.reg.value, true),  
+                    ea(src));
             }
         }
         break;
@@ -3824,7 +3853,7 @@ bool Recompiler::Recompile(
     default:
 
         println("\t//MISSING INSTRUCTION HERE TODO ADD");
-        println("\tprintf(\"Missing instruction: {:X}\\n\");", base);
+        println("\tprintf(\"Missing instruction: {} - {:X}\\n\");", buffer, base);
 
         return false;
     }
