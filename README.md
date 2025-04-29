@@ -4,6 +4,9 @@ XboxRecomp is a tool that converts Xbox executables (xbe file) into C++ code, wh
 
 This project was built (and therefore inspired) from [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), most PPC logic was rewritten for x86. (Sometimes in a questionable way as assembly isn't my expertise.).
 
+WARNING: This project isn't a plug and play or a XBE to EXE converter, this tool ONLY converts the game code to C++, which is not going to function correctly without a runtime backing it.
+You will have to implement a proper backend, emulate Xbox Kernel at minimum as well as other manual tweaks to make the game working properly.
+
 ## Implementation Details
 
 ### Instructions
@@ -30,10 +33,6 @@ Variations in other games may also require modifications to the detection logic.
 
 XboxAnalyse generates a TOML file containing detected jump tables, which can be referenced in the main TOML config file. This allows the recompiler to generate real switch cases for these jump tables.
 
-### Indirect Jump Tables
-
-Indirect jump tables are resolved in the same way than indirect functions, since all functions get mapped into a "host to guest" array, they will be resolved on runtime on the recompiled game as long as the code for it is implemented.
-
 ### Function Boundary Analysis
 
 XboxAnalyse includes a function boundary analyzer that works in most cases, but is very far from perfect.
@@ -44,7 +43,7 @@ Do not expect to get all your functions extracted and analysed, some will need m
 
 ### Exceptions
 
-XBE File contains SEH functions which handle exceptions, those functions are usually assigned in a reguler game function with a consistent pattern (e.g push 0x0FFFFFFFF -> push offset seh_XXXXXX).
+XBE File contains SEH functions which handle exceptions, those functions are usually assigned in a regular game function with a consistent pattern (e.g push 0x0FFFFFFFF -> push offset seh_XXXXXX).
 
 Sometimes, functions that assign SEH function has orphan blocks, meaning it has block code that is only supposed to be read if the code fail and the exception runs.
 While it's rare, those functions might fail in recompilation, they might need manual handle.
