@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <atomic>
 
 #include "stdio.h"
 #include "assert.h"
@@ -612,10 +613,8 @@ struct X87FPU
     }
 
 
-    // In X87FPU struct
     void set_exception_flags(uint8_t exception_type) 
     {
-
         constexpr uint16_t FLAGS_INVALID = C0 | C2;  // For NaN/Invalid ops
         constexpr uint16_t FLAGS_DIVZERO = C0 | C3;  // For x/0
         constexpr uint16_t FLAGS_STACK = C0 | C1;  // Stack faults
@@ -628,6 +627,29 @@ struct X87FPU
         }
     }
 
+
+    void handle_exceptions() 
+    {
+        const uint16_t exceptions = sw & 0x3F; // Get exception flags
+
+        if (exceptions & 0x01) { //Invalid operation
+            sw |= C0; // Set condition code
+            if (cw & 0x01) 
+            { 
+                printf("FPU Invalid Operation\n");
+            }
+        }
+
+        if (exceptions & 0x04) { // Division by zero
+            sw |= C2; // Set condition code
+            if (cw & 0x04) 
+            { 
+                printf("FPU Divide by zero\n");
+            }
+        }
+
+        sw &= ~0x3F; // Clear exception flags after handling
+    }
 
     double round_to_control(double value) const 
     {

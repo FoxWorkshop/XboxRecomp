@@ -239,13 +239,8 @@ bool isPadding(uint8_t* data, const uint32_t i)
     if (i < 16) //prevent crash if used on very first instruction and function
         return false;
 
-    bool isValid = false;
-    for (int j = -1; j > -3; j--)
-    {
-        isValid = data[i + j] == 0xCC;
-    }
 
-    return isValid;
+    return data[i + -1] == 0xCC && (data[i + -2] == 0xCC || data[i + -2] == 0xC3);
 }
 
 void CheckTailJmp(const Image& image, std::unordered_set<size_t>& duplicateCheck, std::vector<size_t>& funcsTable)
@@ -710,7 +705,7 @@ void Recompiler::Analyse()
     for (auto& fn : functions)
     {
         image.symbols.emplace(fmt::format("sub_{:X}", fn.base), fn.base, fn.size, Symbol_Function);
-        outfileFunc << std::hex << fn.base << std::endl;
+        outfileFunc << "{ address = 0x" << std::hex << fn.base << ", size = 0x" << std::hex << fn.size << " }," << std::endl;
     }
 
     outfileFunc.close();
@@ -2054,7 +2049,7 @@ bool Recompiler::Recompile(
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
 
-                println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)({})));", get_x86_reg(dst.reg.value), ea(src));
+                println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)(&X86_LOAD_F32({}))));", get_x86_reg(dst.reg.value), ea(src));
             }
         }
         break;
@@ -2098,6 +2093,30 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FADD:
         floatOperations("+");
         break;
+    case ZYDIS_MNEMONIC_FADDP:
+        if (insn.insn.operand_count == 0) 
+        {
+            // Implicit ST(1) = ST(0) + ST(1), then pop
+            println("\tctx.fpu.st1() += ctx.fpu.st0();");
+            println("\tctx.fpu.pop();");
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        }
+        else if (insn.insn.operand_count >= 2) {
+            const auto& dest = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
+
+                println("\tctx.fpu.st{}() += ctx.fpu.st{}();",
+                    dest.reg.value - ZYDIS_REGISTER_ST0,
+                    src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.pop();");
+                println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            }
+        }
+        break;
     case ZYDIS_MNEMONIC_FABS:
         println("\tctx.fpu.st0() = fabs(ctx.fpu.st0());");
         break;
@@ -2111,6 +2130,14 @@ bool Recompiler::Recompile(
         println("\t    ctx.fpu.st0() = cos(valDouble0);");
         println("\t}}");
         break;
+    case ZYDIS_MNEMONIC_FLDLG2:
+        println("\tctx.fpu.push(std::log2(10.0L));");
+        println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        break;
+    case ZYDIS_MNEMONIC_FNCLEX:
+        println("\tctx.fpu.sw &= ~0x3F; //Clear all exception flags (bits 0-5)");
+        break;
+
     case ZYDIS_MNEMONIC_FPATAN:
         println("\tdouble st1Temp_{:X} = ctx.fpu.st1();", base);
         println("\tdouble st0Temp_{:X} = ctx.fpu.st0();", base);
@@ -2357,6 +2384,42 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.st0() = ctx.fpu.st{}();", st_index);
             println("\tctx.fpu.st{}() = tmp_{:X};", st_index, base);
         }
+        break;
+    case ZYDIS_MNEMONIC_FNSTCW:
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) 
+        {
+            println("\tX86_STORE_U16({}, ctx.fpu.cw);", ea(insn.operands[0]));
+        }
+        break;
+    case ZYDIS_MNEMONIC_FLDCW:
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) 
+        {
+            println("\tctx.fpu.cw = X86_LOAD_U16({});", ea(insn.operands[0]));
+            println("\t_MM_SET_ROUNDING_MODE((ctx.fpu.cw >> 10) & 0x3);");
+        }
+        break;
+    case ZYDIS_MNEMONIC_FRNDINT:
+        println("\tswitch ((ctx.fpu.cw >> 10) & 0x3) {{");  // Check rounding mode
+        println("\tcase 0: //Round to nearest");
+        println("\t    ctx.fpu.st0() = std::nearbyint(ctx.fpu.st0()); break;");
+        println("\tcase 1: //Round down");
+        println("\t    ctx.fpu.st0() = std::floor(ctx.fpu.st0()); break;");
+        println("\tcase 2: //Round up");
+        println("\t    ctx.fpu.st0() = std::ceil(ctx.fpu.st0()); break;");
+        println("\tcase 3: //Truncate");
+        println("\t    ctx.fpu.st0() = std::trunc(ctx.fpu.st0()); break;");
+        println("\t}}");
+        println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        break;
+    case ZYDIS_MNEMONIC_FYL2X:
+        println("\tctx.fpu.st1() = ctx.fpu.st1() * std::log2(ctx.fpu.st0());");
+        println("\tctx.fpu.pop();");
+        println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        break;
+    case ZYDIS_MNEMONIC_FWAIT:
+        println("\tif (ctx.fpu.sw & 0x3F) {{");  // Check exception flags
+        println("\t    ctx.fpu.handle_exceptions();");  
+        println("\t}}");
         break;
     case ZYDIS_MNEMONIC_JZ:
         if (insn.insn.operand_count >= 1) {
@@ -3347,6 +3410,28 @@ bool Recompiler::Recompile(
                 println("\tauto {} = X86_LOAD_{}({});", tmp_var, size_suffix, ea(op1));
                 println("\tX86_STORE_{}({}, {});", size_suffix, ea(op1), get_x86_reg(op2.reg.value));
                 println("\t{} = {};", get_x86_reg(op2.reg.value), tmp_var);
+            }
+        }
+        break;
+    case ZYDIS_MNEMONIC_XADD:
+
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_LOCK)
+            {
+                println("\tauto old_val_{} = X86_LOAD_U32({});", base, ea(dst));
+                println("\tX86_STORE_U32({}, old_val_{} + {});", ea(dst), base, format_operand(src));
+                println("\t{} = old_val_{};", format_operand(src), base);
+                println("\tstd::atomic_thread_fence(std::memory_order_seq_cst);");
+            }
+            else 
+            {
+                println("\tauto temp_{} = {};", base, format_operand(src));
+                println("\t{} += {};", format_operand(src), format_operand(dst));
+                println("\t{} = temp_{};", format_operand(dst), base);
             }
         }
         break;

@@ -129,3 +129,17 @@ typedef struct _XDISPATCHER_HEADER
 } XDISPATCHER_HEADER, * XPDISPATCHER_HEADER;
 
 typedef XDISPATCHER_HEADER XKEVENT;
+
+typedef struct _XRTL_CRITICAL_SECTION
+{
+    XDISPATCHER_HEADER   Event;
+    long_xt             LockCount;
+    long_xt             RecursionCount;
+    uint32_t           OwningThread;
+} XRTL_CRITICAL_SECTION;
+
+typedef struct _XANSI_STRING {
+    uint16_t Length;
+    uint16_t MaximumLength;
+    xpointer<char> Buffer;
+} XANSI_STRING;
