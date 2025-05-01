@@ -2199,12 +2199,72 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FMUL:
         floatOperations("*");
         break;
+    case ZYDIS_MNEMONIC_FIMUL:
+        if (insn.insn.operand_count >= 1) 
+        {
+            const auto& src = insn.operands[0];
+
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
+                switch (src.size) 
+                {
+                case 16:
+                    println("\tctx.fpu.st0() *= (int16_t)X86_LOAD_U16({});", ea(src));
+                    break;
+                case 32:
+                    println("\tctx.fpu.st0() *= (int32_t)X86_LOAD_U32({});", ea(src));
+                    break;
+                default:
+                    println("\tassert(false && \"Invalid operand size for FIMUL\");");
+                }
+            }
+            else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
+                println("\tctx.fpu.st0() *= {};", get_x86_reg(src.reg.value));
+            }
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        }
+        break;
     case ZYDIS_MNEMONIC_FSUB:
         floatOperations("-");
         break;
     case ZYDIS_MNEMONIC_FSUBP:
         println("\tctx.fpu.st1() -= ctx.fpu.st0();");
         println("\tctx.fpu.pop();");
+        break;
+    case ZYDIS_MNEMONIC_FSUBR:
+        if (insn.insn.operand_count >= 1) 
+        {
+            const auto& src = insn.operands[0];
+
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
+                if (ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_X87) 
+                {
+                    println("\tctx.fpu.st0() = ctx.fpu.st{}() - ctx.fpu.st0();", src.reg.value - ZYDIS_REGISTER_ST0);
+                }
+                else 
+                {
+                    // Register contains integer value
+                    println("\tctx.fpu.st0() = {} - ctx.fpu.st0();", get_x86_reg(src.reg.value));
+                }
+            }
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                switch (src.size) 
+                {
+                case 32:
+                    println("\tctx.fpu.st0() = X86_LOAD_F32({}) - ctx.fpu.st0();", ea(src));
+                    break;
+                case 64:
+                    println("\tctx.fpu.st0() = X86_LOAD_F64({}) - ctx.fpu.st0();", ea(src));
+                    break;
+                default:
+                    println("\tassert(false && \"Invalid operand size for FSUBR\");");
+                }
+            }
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        }
         break;
     case ZYDIS_MNEMONIC_FMULP:
         println("\tctx.fpu.st1() *= ctx.fpu.st0();");
@@ -2262,6 +2322,31 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FDIV:
         floatOperations("/");
+        break;
+    case ZYDIS_MNEMONIC_FIDIV:
+        if (insn.insn.operand_count >= 1) 
+        {
+            const auto& src = insn.operands[0];
+
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
+                switch (src.size) {
+
+                case 16:
+                    println("\tctx.fpu.st0() /= (int16_t)X86_LOAD_U16({});", ea(src));
+                    break;
+                case 32:
+                    println("\tctx.fpu.st0() /= (int32_t)X86_LOAD_U32({});", ea(src));
+                    break;
+                default:
+                    println("\tassert(false && \"Invalid operand size for FIDIV\");");
+                }
+            }
+            else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\tctx.fpu.st0() /= {};", get_x86_reg(src.reg.value));
+            }
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        }
         break;
     case ZYDIS_MNEMONIC_FDIVR:
         if (insn.insn.operand_count == 2)
@@ -4298,7 +4383,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
             println("#include \"x86_recomp_shared.h\"\n");
         }
 
-        if ((i % 60) == 0 || (i == (functions.size() - 1)))
+        if ((i % 120) == 0 || (i == (functions.size() - 1)))
             fmt::println("Recompiling functions... {}%", static_cast<float>(i + 1) / functions.size() * 100.0f);
 
 
