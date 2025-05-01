@@ -3916,6 +3916,45 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_SCASB:
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
+        {
+            println("\t\tconst uint8_t al_val_{} = ctx.eax.u8_lo;", base);
+            println("\t\tconst bool df_{} = (ctx.eflags.value & X86EFlags::DF) != 0;", base);
+            println("\t\tuint32_t count_{} = ctx.ecx.u32;", base);
+            println("\t\twhile (count_{} > 0) {{", base);
+            println("\t\t\tctx.eflags.update_compare_flags<uint8_t>(al_val_{}, X86_LOAD_U8(ctx.edi.u32));", base);
+            println("\t\t\tctx.edi.u32 += df_{} ? -1 : 1;", base);
+            println("\t\t\tcount_{}--;", base);
+            println("\tif ((ctx.eflags.value & X86EFlags::ZF) != 0) {{");
+            println("\t\t\t\tbreak;");
+            println("\t}}");
+            println("\t\t}}");
+            println("\t\tctx.ecx.u32 = count_{};", base);
+        }
+        else {
+            println("\t\tuint8_t mem_val = X86_LOAD_U8(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint8_t>(ctx.eax.u8_lo, mem_val);");
+            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
+        }
+        break;
+    case ZYDIS_MNEMONIC_SETB:
+        if (insn.insn.operand_count >= 1) 
+        {
+            const auto& dst = insn.operands[0];
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
+                println("\t{} = (ctx.eflags.value & X86EFlags::CF) ? 1 : 0;",
+                    get_x86_reg(dst.reg.value));
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
+                println("\tX86_STORE_U8({}, (ctx.eflags.value & X86EFlags::CF) ? 1 : 0);",
+                    ea(dst));
+            }
+        }
+        break;
     case ZYDIS_MNEMONIC_SETL:
         if (insn.insn.operand_count >= 1)
         {
