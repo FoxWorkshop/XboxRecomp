@@ -1907,32 +1907,38 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_CMP:
         if (insn.insn.operand_count >= 2)
         {
+            auto size = insn.operands[0].size;
             const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
-
+            const char* type_name = GetOperandTypeName(insn.operands[0].size);
             // Handle memory-to-register compares (e.g., `cmp [eax], eax`)
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                std::string lhs = fmt::format("X86_LOAD_U32({})", ea(insn.operands[0]));
+                std::string lhs = fmt::format("X86_LOAD_{}({})", size_suffix, ea(insn.operands[0]));
                 std::string rhs;
 
                 if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
                 {
                     // Register operand (e.g., EAX)
-                    rhs = fmt::format("ctx.{}.u32", get_register_name(insn.operands[1].reg.value));
+                    rhs = fmt::format("ctx.{}.u32", get_register_name(insn.operands[1].reg.value), size_suffix == "U8" ? "u8" :
+                        size_suffix == "U16" ? "u16" : "u32");
                 }
-                else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) 
+                {
                     // Immediate operand (e.g., `cmp [eax], 0x42`)
-                    rhs = fmt::format("0x{:X}u", static_cast<uint32_t>(insn.operands[1].imm.value.u));
+                    const char* cast_type = size_suffix == "U8" ? "uint8_t" :
+                        size_suffix == "U16" ? "uint16_t" : "uint32_t";
+                    rhs = fmt::format("static_cast<{}>({:#x}u)", cast_type,
+                        insn.operands[1].imm.value.u);
                 }
                 else {
                     throw std::runtime_error("Unsupported CMP operand type");
                 }
 
-                println("\tctx.eflags.update_compare_flags<uint32_t>({}, {});", lhs, rhs);
+                println("\tctx.eflags.update_compare_flags<{}>({}, {});", type_name, lhs, rhs);
             }
-            else {
+            else 
+            {
                 // Default handling for non-memory operands
-                const char* type_name = GetOperandTypeName(insn.operands[0].size);
                 std::string lhs = format_operand(insn.operands[0], size_suffix);
                 std::string rhs = format_operand(insn.operands[1], size_suffix);
                 println("\tctx.eflags.update_compare_flags<{}>({}, {});", type_name, lhs, rhs);
