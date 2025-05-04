@@ -20,6 +20,12 @@ const static ZydisMnemonic U64OP[] =
     ZYDIS_MNEMONIC_PUNPCKLDQ, ZYDIS_MNEMONIC_PUNPCKHDQ
 };
 
+const static ZydisMnemonic U32OP[] =
+{
+    ZYDIS_MNEMONIC_ADC, ZYDIS_MNEMONIC_MOVSB, ZYDIS_MNEMONIC_MOVSW,
+    ZYDIS_MNEMONIC_CMPSD
+};
+
 struct RecompilerLocalVariables
 {
     bool r[8]{};   //General-purpose registers (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP)
@@ -31,7 +37,7 @@ struct RecompilerLocalVariables
 
     //temp to avoid variable redundancy 
     bool valDouble[3]{};
-    bool valUint[2]{};
+    bool valUint32[2]{};
     bool valUint64[2]{};
 
     bool isUint64OP(const ZydisMnemonic op)
@@ -39,6 +45,17 @@ struct RecompilerLocalVariables
         for (int i = 0; i < LengthOfArray(U64OP); i++)
         {
             if (U64OP[i] == op)
+                return true;
+        }
+
+        return false;
+    }    
+    
+    bool isUint32OP(const ZydisMnemonic op)
+    {
+        for (int i = 0; i < LengthOfArray(U32OP); i++)
+        {
+            if (U32OP[i] == op)
                 return true;
         }
 
