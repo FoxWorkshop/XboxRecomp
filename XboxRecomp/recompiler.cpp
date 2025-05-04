@@ -1501,7 +1501,7 @@ bool Recompiler::Recompile(
                 // Load source value into a temporary variable
                 if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                     println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-        }
+                }
                 else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     println("\tauto {} = {};", temp_src, src.imm.value.u);
                 }
@@ -1513,7 +1513,7 @@ bool Recompiler::Recompile(
                 println("\tauto {} = {} + {} + cf_value_{};", temp_res, temp_old, temp_src, base);
                 println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
                 println("\tctx.eflags.update_flags_adc({}, {}, cf_value_{}, {});", temp_old, temp_src, base, temp_res);
-        }
+            }
             else { // Register destination
                 std::string dst_reg = get_x86_reg(dst.reg.value);
                 std::string temp_old = get_temp_reg(dst.size) + "_OLD";
@@ -2682,18 +2682,14 @@ bool Recompiler::Recompile(
         println("\tctx.eflags.set_df(true);  //Set backward direction");
         break;
     case ZYDIS_MNEMONIC_ADD:
-        if (insn.insn.operand_count >= 2)
+        if (insn.insn.operand_count >= 2) 
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            std::string lhs = format_operand(dst, size_suffix);
-            std::string rhs = format_operand(insn.operands[1], size_suffix);
 
-            if (!lhs.empty() && !rhs.empty())
+            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) 
             {
-                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
                 std::string temp_old = get_temp_reg(dst.size) + "_OLD";
                 std::string temp_src = get_temp_reg(dst.size) + "_SRC";
                 std::string temp_res = get_temp_reg(dst.size) + "_RES";
@@ -2717,7 +2713,7 @@ bool Recompiler::Recompile(
                 println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
                 println("\tctx.eflags.update_flags_add({}, {}, {});", temp_old, temp_src, temp_res);
             }
-                else
+            else 
             { // Register destination
                 std::string dst_reg = get_x86_reg(dst.reg.value);
                 std::string temp_old = get_temp_reg(dst.size) + "_OLD";
@@ -2732,10 +2728,10 @@ bool Recompiler::Recompile(
                 }
                 else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     println("\tauto {} = {};", temp_src, src.imm.value.u);
-            }
+                }
                 else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                     println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
-        }
+                }
 
                 // Perform the addition
                 println("\t{} = {} + {};", dst_reg, temp_old, temp_src);
@@ -2747,13 +2743,11 @@ bool Recompiler::Recompile(
         HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "+=");
         break;
     case ZYDIS_MNEMONIC_SUB:
-        if (insn.insn.operand_count >= 2)
+        if (insn.insn.operand_count >= 2) 
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            std::string lhs = format_operand(dst, size_suffix);
-            std::string rhs = format_operand(insn.operands[1], size_suffix);
 
             if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                 std::string temp_old = get_temp_reg(dst.size) + "_OLD";
@@ -2782,7 +2776,7 @@ bool Recompiler::Recompile(
 
                 // Update flags properly
                 println("\tctx.eflags.update_flags_sub({}, {}, {});", temp_old, temp_src, temp_res);
-                }
+            }
             else { // Register destination
                 std::string dst_reg = get_x86_reg(dst.reg.value);
                 std::string temp_old = get_temp_reg(dst.size) + "_OLD";
@@ -2794,10 +2788,10 @@ bool Recompiler::Recompile(
                 // Get source value
                 if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                     println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-            }
+                }
                 else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     println("\tauto {} = {};", temp_src, src.imm.value.u);
-        }
+                }
                 else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                     println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
                 }
@@ -3342,9 +3336,17 @@ bool Recompiler::Recompile(
     }
 
     case ZYDIS_MNEMONIC_MOVSD:
-        println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 4, ctx.edi.u32 += 4) {{");
-        println("\t\tX86_STORE_U32(ctx.edi.u32, X86_LOAD_U32(ctx.esi.u32));");
-        println("\t}}");
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 4, ctx.edi.u32 += 4) {{");
+            println("\t\tX86_STORE_U32(ctx.edi.u32, X86_LOAD_U32(ctx.esi.u32));");
+            println("\t}}");
+        }
+        else {
+            println("\tX86_STORE_U32(ctx.edi.u32, X86_LOAD_U32(ctx.esi.u32));");
+            println("\tctx.esi.u32 += 4;");
+            println("\tctx.edi.u32 += 4;");
+        }
         break;
     case ZYDIS_MNEMONIC_MOVAPS:
         if (insn.insn.operand_count >= 2)
@@ -3379,12 +3381,23 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVSB:
-        /**println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32++, ctx.edi.u32++) {{");
-        println("\t\tX86_STORE_U32(ctx.edi.u32, X86_LOAD_U32(ctx.esi.u32));");
-        println("\t}}");*/
-        println("\tX86_STORE_U8(ctx.edi.u32, X86_LOAD_U8(ctx.esi.u32));");
-        println("\tctx.eflags.update_string_pointer(ctx.esi.u32);");
-        println("\tctx.eflags.update_string_pointer(ctx.edi.u32);");
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP)
+        {
+            println("\tuint32_t count_{} = ctx.ecx.u32;", base);
+            println("\tint direction_{} = (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;", base);
+            println("\tfor (; count_{} > 0; count_{}--) {{", base, base);
+            println("\t\tX86_STORE_U8(ctx.edi.u32, X86_LOAD_U8(ctx.esi.u32));");
+            println("\t\tctx.esi.u32 += direction_{};", base);
+            println("\t\tctx.edi.u32 += direction_{};", base);
+            println("\t\tctx.ecx.u32--;");
+            println("\t}}");
+        }
+        else
+        {
+            println("\tX86_STORE_U8(ctx.edi.u32, X86_LOAD_U8(ctx.esi.u32));");
+            println("\tctx.eflags.update_string_pointer(ctx.esi.u32);");
+            println("\tctx.eflags.update_string_pointer(ctx.edi.u32);");
+        }
         break;
     case ZYDIS_MNEMONIC_MOVSW:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP)
@@ -3514,7 +3527,6 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            const std::string cf = "(ctx.eflags.CF ? 1 : 0)";
 
             // Save the CF value before operation
             println("\tuint32_t cf_value_{} = (ctx.eflags.value & X86EFlags::CF) ? 1 : 0;", base);
@@ -3526,7 +3538,6 @@ bool Recompiler::Recompile(
                 std::string temp_res = get_temp_reg(dst.size) + "_RES";
 
                 println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(dst));
-                println("\tauto {} = {};", temp_res, temp_old);
 
                 // Load source value into a temporary variable
                 if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
@@ -3916,12 +3927,86 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CMPSB:
-        println("\tctx.eflags.update_compare_flags(");
-        println("\t    X86_LOAD_U8(ctx.esi.u32),");
-        println("\t    X86_LOAD_U8(ctx.edi.u32)");
-        println("\t);");
-        println("\tctx.eflags.update_string_pointer(ctx.esi.u32);");
-        println("\tctx.eflags.update_string_pointer(ctx.edi.u32);");
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE)
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 1, ctx.edi.u32 += 1) {{");
+            println("\t\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
+            println("\t\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint8_t>(val1, val2);");
+            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
+            println("\t}}");
+        }
+        else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 1, ctx.edi.u32 += 1) {{");
+            println("\t\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
+            println("\t\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint8_t>(val1, val2);");
+            println("\t\tif (ctx.eflags.value & X86EFlags::ZF) break;");
+            println("\t}}");
+        }
+        else 
+        {
+            println("\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
+            println("\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
+            println("\tctx.eflags.update_compare_flags<uint8_t>(val1, val2);");
+            println("\tctx.esi.u32 += 1;");
+            println("\tctx.edi.u32 += 1;");
+        }
+        break;
+    case ZYDIS_MNEMONIC_CMPSD:
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 4, ctx.edi.u32 += 4) {{");
+            println("\t\tuint32_t val1 = X86_LOAD_U32(ctx.esi.u32);");
+            println("\t\tuint32_t val2 = X86_LOAD_U32(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint32_t>(val1, val2);");
+            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
+            println("\t}}");
+        }
+        else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 4, ctx.edi.u32 += 4) {{");
+            println("\t\tuint32_t val1 = X86_LOAD_U32(ctx.esi.u32);");
+            println("\t\tuint32_t val2 = X86_LOAD_U32(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint32_t>(val1, val2);");
+            println("\t\tif (ctx.eflags.value & X86EFlags::ZF) break;");
+            println("\t}}");
+        }
+        else 
+        {
+            println("\tuint32_t val1 = X86_LOAD_U32(ctx.esi.u32);");
+            println("\tuint32_t val2 = X86_LOAD_U32(ctx.edi.u32);");
+            println("\tctx.eflags.update_compare_flags<uint32_t>(val1, val2);");
+            println("\tctx.esi.u32 += 4;");
+            println("\tctx.edi.u32 += 4;");
+        }
+        break;
+    case ZYDIS_MNEMONIC_CMPSW:
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE) {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 2, ctx.edi.u32 += 2) {{");
+            println("\t\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
+            println("\t\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint16_t>(val1, val2);");
+            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
+            println("\t}}");
+        }
+        else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.esi.u32 += 2, ctx.edi.u32 += 2) {{");
+            println("\t\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
+            println("\t\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint16_t>(val1, val2);");
+            println("\t\tif (ctx.eflags.value & X86EFlags::ZF) break;");
+            println("\t}}");
+        }
+        else {
+            println("\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
+            println("\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
+            println("\tctx.eflags.update_compare_flags<uint16_t>(val1, val2);");
+            println("\tctx.esi.u32 += 2;");
+            println("\tctx.edi.u32 += 2;");
+        }
         break;
     case ZYDIS_MNEMONIC_ROL:
         if (insn.insn.operand_count >= 2)
@@ -4056,7 +4141,15 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_SCASB:
-        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE) 
+        {
+            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.edi.u32 += 1) {{");
+            println("\t\tuint8_t val = X86_LOAD_U8(ctx.edi.u32);");
+            println("\t\tctx.eflags.update_compare_flags<uint8_t>(ctx.eax.u8_lo, val);");
+            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
+            println("\t}}");
+        }
+        else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE) 
         {
             println("\t\tconst uint8_t al_val_{} = ctx.eax.u8_lo;", base);
             println("\t\tconst bool df_{} = (ctx.eflags.value & X86EFlags::DF) != 0;", base);
