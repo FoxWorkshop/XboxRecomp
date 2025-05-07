@@ -203,23 +203,23 @@ struct X86EFlags
     void update_compare_flags_sse(float lhs, float rhs)
     {
         clear_compare_flags();
-
         const bool unordered = std::isnan(lhs) || std::isnan(rhs);
 
         // ZF: equal (including unordered)
-        if (lhs == rhs || (std::isnan(lhs) || std::isnan(rhs)))
+        if (lhs == rhs || unordered)
             value |= ZF;
 
-        // SF: less than (or unordered)
-        if (lhs < rhs || (std::isnan(lhs) || std::isnan(rhs)))
-            value |= SF;
+        // CF: set when lhs < rhs (for jb instruction)
+        if (lhs < rhs)
+            value |= CF;
 
         // PF: unordered (either is NaN)
         if (unordered)
-            value |= PF; // Set unordered flag
+            value |= PF;
 
-        // OF/CF: cleared for SSE comparisons
-        value &= ~(OF | CF);
+        // SF: typically not used in FP comparisons
+        // OF: typically cleared in FP comparisons
+        value &= ~OF;
     }
 
     void update_sub_flags(uint32_t lhs, uint32_t rhs, uint32_t result)
