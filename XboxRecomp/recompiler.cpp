@@ -1986,6 +1986,54 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_CMOVNZ:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            println("\tif ((ctx.eflags.value & X86EFlags::ZF) == 0) {{");
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\t    {} = {};", get_x86_reg(dst.reg.value),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\t    X86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            println("\t}}");
+        }
+        break;
+
+    case ZYDIS_MNEMONIC_CMOVNLE:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+
+            println("\tif (((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))) {{");
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\t    {} = {};", get_x86_reg(dst.reg.value),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\t    X86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            println("\t}}");
+        }
+        break;
     case ZYDIS_MNEMONIC_COMISS:
         if (insn.insn.operand_count >= 2)
         {
