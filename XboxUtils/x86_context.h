@@ -162,11 +162,8 @@ struct X86EFlags
         value &= ~(CF | PF | AF | ZF | SF | OF);
     }
 
-    // Primary comparison function
-    void update_compare_flags(uint32_t lhs, uint32_t rhs) {
-
+    void update_compare_flags_U32(uint32_t lhs, uint32_t rhs) {
         clear_compare_flags();
-
         // Calculate result and flags
         uint32_t result = lhs - rhs;
         bool carry = lhs < rhs;  // Unsigned overflow
@@ -193,11 +190,52 @@ struct X86EFlags
             value |= OF;
     }
 
-    // Template alias for backward compatibility
-    template<typename T>
-    void update_compare_flags(T lhs, T rhs) {
-        update_compare_flags(static_cast<uint32_t>(lhs),
-            static_cast<uint32_t>(rhs));
+
+    void update_compare_flags_U16(uint16_t lhs, uint16_t rhs) {
+        clear_compare_flags();
+
+        uint16_t result = lhs - rhs;
+        bool carry = lhs < rhs;
+
+        if (result == 0)
+            value |= ZF;
+
+        if (result & 0x8000)
+            value |= SF;
+
+        if ((__builtin_popcount(result & 0xFF) % 2) == 0)
+            value |= PF;
+
+        if (carry)
+            value |= CF;
+
+        bool overflow = ((lhs ^ rhs) & (lhs ^ result)) & 0x8000;
+        if (overflow)
+            value |= OF;
+    }
+
+    void update_compare_flags_U8(uint8_t lhs, uint8_t rhs) {
+        clear_compare_flags();
+
+        uint8_t result = lhs - rhs;
+        bool carry = lhs < rhs;
+
+        if (result == 0)
+            value |= ZF;
+
+        if (result & 0x80)
+            value |= SF;
+
+        if ((__builtin_popcount(result) % 2) == 0)
+            value |= PF;
+
+        if (carry)
+            value |= CF;
+
+        // 8-bit signed overflow check
+        bool overflow = ((lhs ^ rhs) & (lhs ^ result)) & 0x80;
+        if (overflow)
+            value |= OF;
     }
 
     void update_compare_flags_sse(float lhs, float rhs)
@@ -309,7 +347,7 @@ struct X86EFlags
         clear_compare_flags();
 
         // Special case: SUB X,0 is identical to TEST X,X (only affects SF/ZF/PF)
-        if (rhs == 0) 
+        if (rhs == 0)
         {
             value |= (result == 0) ? ZF : 0;
             value |= (result >> 31) & SF;
@@ -380,7 +418,7 @@ struct X86EFlags
     {
         clear_compare_flags();
         // Correct CF behavior for NEG:
-        value |= (original_value != 0) ? X86EFlags::CF : 0; 
+        value |= (original_value != 0) ? X86EFlags::CF : 0;
 
         // OF set if negating INT_MIN
         value |= (original_value == 0x80000000) ? X86EFlags::OF : 0;
@@ -450,7 +488,39 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
+    void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    {
+        clear_compare_flags();
 
+        // Only update flags if shift count is non-zero
+        if (shift_count > 0) 
+        {
+            // Get bit width of the operand
+            uint32_t bit_width = 32; // Assuming 32-bit operation by default
+
+            // CF = Last bit shifted out of the high-order bit
+            uint32_t msb_position = bit_width - 1;
+            uint32_t last_bit_shifted_out = (value_before >> (msb_position - (shift_count - 1))) & 1;
+            value |= last_bit_shifted_out ? CF : 0;
+
+            // OF = For a 1-bit shift, OF is set if the MSB changed
+            if (shift_count == 1) {
+                bool msb_before = (value_before >> msb_position) & 1;
+                bool msb_after = (result >> msb_position) & 1;
+                value |= (msb_before != msb_after) ? OF : 0;
+            }
+
+            // SF = MSB of result
+            value |= (result >> msb_position) & SF;
+
+            // ZF = Result is zero
+            value |= (result == 0) ? ZF : 0;
+
+            // PF = Parity of LSB
+            uint8_t lsb = result & 0xFF;
+            value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        }
+    }
 
     // Updates flags after SAR (Shift Arithmetic Right)
     void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result) {
@@ -546,14 +616,14 @@ struct X87FPU
     };
     uint16_t tw = 0xFFFF; //Tag word (all empty by default)
 
-    void push(long double value) 
+    void push(long double value)
     {
-        top = (top - 1) & 7;  
+        top = (top - 1) & 7;
 
         if ((tw & (1 << top)) == 0) {
-            sw |= C0 | C1;  
-            if (value != value) 
-            { 
+            sw |= C0 | C1;
+            if (value != value)
+            {
                 sw |= C2;
             }
         }
@@ -562,12 +632,12 @@ struct X87FPU
         tw &= ~(1 << top);  // Mark register as used
     }
 
-    long double pop() 
+    long double pop()
     {
 
-        if (tw & (1 << top)) 
+        if (tw & (1 << top))
         {
-            sw |= C0 | C1; 
+            sw |= C0 | C1;
             return std::numeric_limits<double>::quiet_NaN();
         }
 
@@ -606,7 +676,7 @@ struct X87FPU
     }
 
 
-    void set_exception_flags(uint8_t exception_type) 
+    void set_exception_flags(uint8_t exception_type)
     {
         constexpr uint16_t FLAGS_INVALID = C0 | C2;  // For NaN/Invalid ops
         constexpr uint16_t FLAGS_DIVZERO = C0 | C3;  // For x/0
@@ -621,22 +691,22 @@ struct X87FPU
     }
 
 
-    void handle_exceptions() 
+    void handle_exceptions()
     {
         const uint16_t exceptions = sw & 0x3F; // Get exception flags
 
         if (exceptions & 0x01) { //Invalid operation
             sw |= C0; // Set condition code
-            if (cw & 0x01) 
-            { 
+            if (cw & 0x01)
+            {
                 printf("FPU Invalid Operation\n");
             }
         }
 
         if (exceptions & 0x04) { // Division by zero
             sw |= C2; // Set condition code
-            if (cw & 0x04) 
-            { 
+            if (cw & 0x04)
+            {
                 printf("FPU Divide by zero\n");
             }
         }
@@ -644,7 +714,7 @@ struct X87FPU
         sw &= ~0x3F; // Clear exception flags after handling
     }
 
-    double round_to_control(double value) const 
+    double round_to_control(double value) const
     {
         const int rounding_mode = (cw >> 10) & 3;
         const int precision = (cw >> 8) & 3;
@@ -667,7 +737,7 @@ struct X87FPU
         }
     }
 
-    void compare_and_pop(long double rhs, int pops = 0) 
+    void compare_and_pop(long double rhs, int pops = 0)
     {
         clear_flags();
 
@@ -725,20 +795,20 @@ struct X86Context
     X87FPU fpu;
 
     // In X86Context struct
-    void set_mxcsr(uint32_t value) 
+    void set_mxcsr(uint32_t value)
     {
         mxcsr = value & 0xFFC0; // Mask reserved bits
         _mm_setcsr(mxcsr);
     }
 
-    uint32_t get_mxcsr() const 
+    uint32_t get_mxcsr() const
     {
         return _mm_getcsr();
     }
 
     void handle_sse_exceptions() {
         uint32_t exceptions = mxcsr & 0x3F;
-        if (exceptions) 
+        if (exceptions)
         {
             mxcsr &= ~0x3F; // Clear exception flags
         }
@@ -791,7 +861,7 @@ inline __m128i X86_AVG_EPU16(__m128i a, __m128i b)
     return _mm_avg_epu16(a, b);
 }
 
-inline uint64_t X86_PSHUFW(uint64_t src, uint8_t control) 
+inline uint64_t X86_PSHUFW(uint64_t src, uint8_t control)
 {
     const uint16_t w0 = (src >> (0 * 16)) & 0xFFFF;
     const uint16_t w1 = (src >> (1 * 16)) & 0xFFFF;
