@@ -57,6 +57,9 @@
 #define XMM_F32(reg, idx) (ctx.vec[reg].f32[idx])
 #define XMM_U32(reg, idx) (ctx.vec[reg].u32[idx])
 
+#define X86_LOAD_PS(addr) _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
+#define X86_STORE_PS(addr, val) _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), (val))
+
 // SSE Load Operations
 #define X86_MOVUPS(reg, addr) \
     ctx.xmm[(reg)] = _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
