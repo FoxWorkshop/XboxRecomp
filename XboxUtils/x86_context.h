@@ -54,53 +54,39 @@
 #define X86_STORE_F32(addr, value) (*reinterpret_cast<volatile float*>(base + (addr)) = static_cast<float>(value))
 #define X86_STORE_F64(addr, value) (*reinterpret_cast<volatile double*>(base + (addr)) = static_cast<double>(value))
 
-#define XMM_F32(reg, idx) (ctx.vec[reg].f32[idx])
-#define XMM_U32(reg, idx) (ctx.vec[reg].u32[idx])
+// SSE Load/Store 128-bit Macros
+#define XMM_F32(reg, idx) (ctx.xmm[reg].f32[idx])
+#define XMM_U32(reg, idx) (ctx.xmm[reg].u32[idx])
 
 #define X86_LOAD_PS(addr) _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
 #define X86_STORE_PS(addr, val) _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), (val))
 
-// SSE Load Operations
-#define X86_MOVUPS(reg, addr) \
-    ctx.xmm[(reg)] = _mm_loadu_ps(reinterpret_cast<const float*>(base + (addr)))
 
-#define X86_MOVAPS(reg, addr) \
-    ctx.xmm[(reg)] = _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
-
-// SSE Store Operations
-#define X86_MOVUPS_STORE(addr, reg) \
-    _mm_storeu_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
-
-#define X86_MOVAPS_STORE(addr, reg) \
-    _mm_store_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
-
-#define X86_MOVNTPS(addr, reg) \
-    _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), ctx.xmm[(reg)])
+// Aligned SSE Load/Store (16-byte alignment required)
+#define X86_LOAD_APS(addr) _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
+#define X86_STORE_APS(addr, val) _mm_store_ps(reinterpret_cast<float*>(base + (addr)), (val))
+#define X86_STORE_NTPS(addr, val) _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), (val))
 
 // Register Operations
 #define X86_MOVAPS_REG(dest, src) \
-    ctx.xmm[(dest)] = ctx.xmm[(src)]
-
+    ctx.xmm[dest].reg = ctx.xmm[src].reg
 #define X86_MOVLHPS(dest, src) \
-    ctx.xmm[(dest)] = _mm_movelh_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
-
+    ctx.xmm[dest].reg = _mm_movelh_ps(ctx.xmm[dest].reg, ctx.xmm[src].reg)
 #define X86_MOVHLPS(dest, src) \
-    ctx.xmm[(dest)] = _mm_movehl_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
+    ctx.xmm[dest].reg = _mm_movehl_ps(ctx.xmm[dest].reg, ctx.xmm[src].reg)
 
 // Arithmetic Operations
 #define X86_ADDPS(dest, src) \
-    ctx.xmm[(dest)] = _mm_add_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
-
+    ctx.xmm[dest].reg = _mm_add_ps(ctx.xmm[dest].reg, ctx.xmm[src].reg)
 #define X86_MULPS(dest, src) \
-    ctx.xmm[(dest)] = _mm_mul_ps(ctx.xmm[(dest)], ctx.xmm[(src)])
-
+    ctx.xmm[dest].reg = _mm_mul_ps(ctx.xmm[dest].reg, ctx.xmm[src].reg)
 #define X86_SHUFPS(dest, src, imm) \
-    ctx.xmm[(dest)] = _mm_shuffle_ps(ctx.xmm[(dest)], ctx.xmm[(src)], (imm))
+    ctx.xmm[dest].reg = _mm_shuffle_ps(ctx.xmm[dest].reg, ctx.xmm[src].reg, imm)
 
 // MMX Load/Store
-#define X86_MMX_LOAD(addr) (*reinterpret_cast<uint64_t*>(base + (addr)))
-#define X86_MMX_STORE(addr, value) (*reinterpret_cast<uint64_t*>(base + (addr)) = (value))
-#define MMX_REG(reg, offset) (ctx.mmx[(reg) - offset])
+#define X86_MMX_LOAD(addr) (*reinterpret_cast<uint64_t*>(base + addr))
+#define X86_MMX_STORE(addr, value) (*reinterpret_cast<uint64_t*>(base + addr) = value)
+#define MMX_REG(reg) (ctx.fpu.mmx[(reg)]) 
 
 #ifndef X86_CALL_FUNC
 #define X86_CALL_FUNC(x) x(ctx, base)
@@ -491,12 +477,12 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
-    void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result) 
+    void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
         clear_compare_flags();
 
         // Only update flags if shift count is non-zero
-        if (shift_count > 0) 
+        if (shift_count > 0)
         {
             // Get bit width of the operand
             uint32_t bit_width = 32; // Assuming 32-bit operation by default
@@ -607,7 +593,10 @@ struct X86EFlags
 
 struct X87FPU
 {
-    long double st[8];  //8-register stack (ST0-ST7)
+    union {
+        long double st[8];  // 8-register FPU stack (ST0-ST7)
+        uint64_t mmx[8];    // MMX registers (MM0-MM7) - share physical space with FPU
+    };
     uint16_t top = 0; //Stack pointer (0-7)
     uint16_t cw = 0x037F; //Control word (default: round-to-nearest, 64-bit precision)
     uint16_t sw = 0;  //Status word
@@ -717,27 +706,35 @@ struct X87FPU
         sw &= ~0x3F; // Clear exception flags after handling
     }
 
-    double round_to_control(double value) const
+    long double round_to_control(long double value) const
     {
-        const int rounding_mode = (cw >> 10) & 3;
-        const int precision = (cw >> 8) & 3;
-
-        // Apply precision first
-        double result;
-        switch (precision) {
-        case 0: result = (double)(float)value; break; // Single
-        case 2: result = (long double)value; break;    // Extended
-        default: result = value; break;                // Double
+        switch ((cw >> 8) & 0x3) 
+        {
+        case 0x0: // 24-bit single precision (float)
+            value = static_cast<long double>(static_cast<float>(value));
+            break;
+        case 0x2: // 53-bit double precision (double)
+            value = static_cast<long double>(static_cast<double>(value));
+            break;
+            // case 0x3: 64-bit extended precision (long double) - no truncation
         }
 
-        // Apply rounding
-        switch (rounding_mode) {
-        case 0: return std::nearbyint(result);
-        case 1: return std::floor(result);
-        case 2: return std::ceil(result);
-        case 3: return std::trunc(result);
-        default: return result;
+        switch ((cw >> 10) & 0x3) {
+        case 0x0: 
+            value = std::nearbyintl(value);
+            break;
+        case 0x1: 
+            value = std::floorl(value);
+            break;
+        case 0x2: 
+            value = std::ceill(value);
+            break;
+        case 0x3: 
+            value = std::truncl(value);
+            break;
         }
+
+        return value;
     }
 
     void compare_and_pop(long double rhs, int pops = 0)
@@ -756,6 +753,14 @@ struct X87FPU
 
         while (pops--) pop();
     }
+};
+
+
+union XmmRegister {
+    __m128 reg;      
+    float f32[4];    
+    uint32_t u32[4]; 
+    uint64_t u64[2];
 };
 
 struct X86Context
@@ -784,20 +789,11 @@ struct X86Context
     // Flags Register
     X86EFlags eflags;
 
-    // Floating-Point and SIMD Registers
-    union {
-        __m128 xmm[8];  // Intrinsic access (for _mm_load_ps, etc.)
-        struct {
-            float   f32[4];  // Per-lane float access
-            uint32_t u32[4]; // Per-lane integer access
-        } vec[8];  // Indexed by register number (0-7)
-    };
+    XmmRegister xmm[8];
 
-    uint64_t mmx[8];
     uint32_t mxcsr = 0x1F80;
     X87FPU fpu;
 
-    // In X86Context struct
     void set_mxcsr(uint32_t value)
     {
         mxcsr = value & 0xFFC0; // Mask reserved bits

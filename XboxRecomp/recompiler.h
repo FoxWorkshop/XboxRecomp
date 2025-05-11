@@ -138,6 +138,8 @@ struct Recompiler
 
     void SaveCurrentOutData(const std::string_view& name = std::string_view());
 
-    void Recompiler::HandleSseScalarInstruction(const x86_insn& insn, const std::function<std::string(size_t)>& xmm,
-        const std::function<std::string(const ZydisDecodedOperandMem&)>& decode_memory_operand, const char* op_symbol);
+    void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
+        const std::function<std::string(size_t)>& xmm,
+        const std::function<std::string(const ZydisDecodedOperandMem&)>& decode_memory_operand,
+        const char* op_symbol, size_t base);
 };

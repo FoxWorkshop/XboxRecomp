@@ -768,8 +768,8 @@ namespace std {
 void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
     const std::function<std::string(size_t)>& xmm,
     const std::function<std::string(const ZydisDecodedOperandMem&)>& decode_memory_operand,
-    const char* op_symbol)
-{
+    const char* op_symbol, size_t base)
+{ 
     if (insn.insn.operand_count != 2) {
         println("// ERROR: Expected 2 operands");
         return;
@@ -785,7 +785,9 @@ void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
     }
 
     const size_t xmm_idx = insn.operands[0].reg.value - ZYDIS_REGISTER_XMM0;
-    const std::string dest = fmt::format("ctx.vec[{}].f32[0]", xmm_idx);
+    const std::string dest = fmt::format("ctx.xmm[{}].reg", xmm_idx);
+
+
 
     // Handle Operand 1 (XMM or memory)
     std::string src;
@@ -795,8 +797,11 @@ void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
             println("// ERROR: Operand 1 is not XMM0-XMM7");
             return;
         }
-        src = fmt::format("ctx.vec[{}].f32[0]",
+
+        src = fmt::format("ctx.xmm[{}].reg",
             insn.operands[1].reg.value - ZYDIS_REGISTER_XMM0);
+
+        println("\t{} = {}({}, {});", dest, op_symbol, dest, src);
     }
     else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
     {
@@ -831,15 +836,15 @@ void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
             }
         }
 
+    
         src = fmt::format("X86_LOAD_F32({})", mem_addr);
+        println("\t{} = {}({}, _mm_load_ss((const float*)&{}));", dest, op_symbol, dest, src);
     }
     else {
         println("// ERROR: Operand 1 must be XMM register or memory");
         return;
     }
 
-    // Generate the operation
-    println("\t{} {} {};", dest, op_symbol, src);
 }
 
 struct ImmWrapper {
@@ -1025,13 +1030,13 @@ bool Recompiler::Recompile(
             {
                 if (reg >= ZYDIS_REGISTER_MM0 && reg <= ZYDIS_REGISTER_MM7)
                 {
-                    return fmt::format("ctx.mmx[{}]", reg - ZYDIS_REGISTER_MM0);
+                    return fmt::format("ctx.fpu.mmx[{}]", reg - ZYDIS_REGISTER_MM0);
                 }
 
                 // Handle XMM registers (OG Xbox only uses XMM0-XMM7)
                 if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM7)
                 {
-                    return fmt::format("ctx.xmm[{}]", reg - ZYDIS_REGISTER_XMM0);
+                    return fmt::format("ctx.xmm[{}].reg", reg - ZYDIS_REGISTER_XMM0);
                 }
                 // Handle x87 FPU stack
                 if (reg >= ZYDIS_REGISTER_ST0 && reg <= ZYDIS_REGISTER_ST7)
@@ -1043,6 +1048,7 @@ bool Recompiler::Recompile(
                 {
                     return "ctx.mxcsr";
                 }
+
 
                 throw std::runtime_error("Unsupported FP/SIMD register");
             }
@@ -1139,19 +1145,6 @@ bool Recompiler::Recompile(
         return fmt::format("ctx.{}", reg_names[index]);
         };
 
-    auto get_fp_reg = [&](ZydisRegister reg) -> std::string
-        {
-            if (reg >= ZYDIS_REGISTER_XMM0 && reg <= ZYDIS_REGISTER_XMM7)
-                return fmt::format("ctx.xmm[{}]", reg - ZYDIS_REGISTER_XMM0);
-
-            if (reg >= ZYDIS_REGISTER_ST0 && reg <= ZYDIS_REGISTER_ST7)
-                return fmt::format("ctx.fpu.st{}()", reg - ZYDIS_REGISTER_ST0);
-
-            if (reg == ZYDIS_REGISTER_MXCSR)
-                return "ctx.mxcsr";
-
-            throw std::runtime_error(fmt::format("Unsupported floating-point register: {}", ZydisRegisterGetString(reg)));
-        };
 
     enum class FPBackend {
         X87,
@@ -1167,9 +1160,10 @@ bool Recompiler::Recompile(
         if (config.floatingPointRegistersAsLocalVariables)
         {
             localVariables.xmm[index] = true;
-            return fmt::format("xmm[{}]", index);
+            return fmt::format("xmm[{}].reg", index);
         }
-        return fmt::format("ctx.xmm[{}]", index);
+
+        return fmt::format("ctx.xmm[{}].reg", index);
         };
 
     auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string {
@@ -1467,6 +1461,7 @@ bool Recompiler::Recompile(
         };
 
 
+
     // Handle x86 instructions
     switch (insn.insn.mnemonic)
     {
@@ -1552,6 +1547,24 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_ANDPS:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].reg = _mm_and_ps(ctx.xmm[{}].reg, ctx.xmm[{}].reg);",  dst_reg, dst_reg, src_reg);
+            }
+            else
+            {
+                println("\tctx.xmm[{}].reg = _mm_and_ps(ctx.xmm[{}].reg, X86_LOAD_PS({}));", dst_reg, dst_reg, ea(src));
+            }
+        }
+        break;
     case ZYDIS_MNEMONIC_BSF:
         if (insn.insn.operand_count >= 2)
         {
@@ -1614,12 +1627,12 @@ bool Recompiler::Recompile(
             const auto& src = insn.operands[1];
             const auto& imm = insn.operands[2];
 
-            const std::string dst_reg = fmt::format("ctx.mmx[{}]",
+            const std::string dst_reg = fmt::format("ctx.fpu.mmx[{}]",
                 dst.reg.value - ZYDIS_REGISTER_MM0);
 
             if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\t{} = X86_PSHUFW(ctx.mmx[{}], 0x{:02X});", dst_reg, src.reg.value - ZYDIS_REGISTER_MM0, imm.imm.value.u & 0xFF);
+                println("\t{} = X86_PSHUFW(ctx.fpu.mmx[{}], 0x{:02X});", dst_reg, src.reg.value - ZYDIS_REGISTER_MM0, imm.imm.value.u & 0xFF);
             }
             else
             {
@@ -1723,7 +1736,8 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVQ:
-        if (insn.insn.operand_count >= 2) {
+        if (insn.insn.operand_count >= 2) 
+        {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
@@ -1732,7 +1746,7 @@ bool Recompiler::Recompile(
                 ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_MMX &&
                 ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_MMX)
             {
-                println("\tctx.mmx[{}] = ctx.mmx[{}];",
+                println("\tctx.fpu.mmx[{}] = ctx.fpu.mmx[{}];",
                     static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_MM0),
                     static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_MM0));
             }
@@ -1741,7 +1755,7 @@ bool Recompiler::Recompile(
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_MMX)
             {
-                println("\tX86_STORE_U64({}, ctx.mmx[{}]);",
+                println("\tX86_STORE_U64({}, ctx.fpu.mmx[{}]);",
                     ea(dst),
                     static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_MM0));
             }
@@ -1750,67 +1764,60 @@ bool Recompiler::Recompile(
                 dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_MMX)
             {
-                println("\tctx.mmx[{}] = X86_LOAD_U64({});",
-                    static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_MM0),
+                println("\tctx.fpu.mmx[{}] = X86_LOAD_U64({});",
+                    dst.reg.value - ZYDIS_REGISTER_MM0,
                     ea(src));
             }
-            else
+
+            // 4. XMM to memory (lower 64 bits only)
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM)
             {
+                println("\tX86_STORE_U64({}, ctx.xmm[{}].u64[0]);",
+                    ea(dst),
+                    src.reg.value - ZYDIS_REGISTER_XMM0);
+            }
 
-                // Handle XMM register to memory/register
-                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                    src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM) {
+            // 5. Memory to XMM (lower 64 bits; zero upper)
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM)
+            {
+                auto index = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].u64[0] = X86_LOAD_U64({});", index, ea(src));
+                println("\tctx.xmm[{}].u64[1] = 0;", index);
+            }
 
-                    // Extract lower 64-bits from XMM and store to memory
-                    println("\tX86_STORE_U64({}, *reinterpret_cast<uint64_t*>(&ctx.vec[{}].u32[0]));",
-                        ea(dst), src.reg.value - ZYDIS_REGISTER_XMM0);
-                }
-                // Handle memory/register to XMM register
-                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                    dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM) {
+            // 6. XMM to XMM (lower 64 bits only)
+            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM &&
+                ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM)
+            {
+                auto dst_idx = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                auto src_idx = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].u64[0] = ctx.xmm[{}].u64[0];", dst_idx, src_idx);
+                println("\tctx.xmm[{}].u64[1] = 0;", dst_idx);
+            }
 
-                    // Load 64-bits from memory to XMM (zeroing upper 64-bits)
-                    println("\t*reinterpret_cast<uint64_t*>(&ctx.vec[{}].u32[0]) = X86_LOAD_U64({});",
-                        dst.reg.value - ZYDIS_REGISTER_XMM0, ea(src));
-                    println("\tctx.vec[{}].u32[2] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                    println("\tctx.vec[{}].u32[3] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                }
-                // Handle XMM to XMM transfer
-                else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM &&
-                    ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM) {
+            // 7. Register (int) to XMM (MOVQ from GP to XMM)
+            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                auto dst_idx = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].u64[0] = {};", dst_idx, format_operand(src, "U64"));
+                println("\tctx.xmm[{}].u64[1] = 0;", dst_idx);
+            }
 
-                    println("\tctx.vec[{}].u32[0] = ctx.vec[{}].u32[0];",
-                        dst.reg.value - ZYDIS_REGISTER_XMM0,
-                        src.reg.value - ZYDIS_REGISTER_XMM0);
-                    println("\tctx.vec[{}].u32[1] = ctx.vec[{}].u32[1];",
-                        dst.reg.value - ZYDIS_REGISTER_XMM0,
-                        src.reg.value - ZYDIS_REGISTER_XMM0);
-                    println("\tctx.vec[{}].u32[2] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                    println("\tctx.vec[{}].u32[3] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    ZydisRegisterGetClass(dst.reg.value) == ZYDIS_REGCLASS_XMM &&
-                    src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-
-                    println("\t*reinterpret_cast<uint64_t*>(&ctx.vec[{}].u32[0]) = {};",
-                        dst.reg.value - ZYDIS_REGISTER_XMM0,
-                        format_operand(src, "U64"));
-                    println("\tctx.vec[{}].u32[2] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                    println("\tctx.vec[{}].u32[3] = 0;", dst.reg.value - ZYDIS_REGISTER_XMM0);
-                }
-                // XMM to general purpose register
-                else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM &&
-                    dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-
-                    println("\t{} = *reinterpret_cast<uint64_t*>(&ctx.vec[{}].u32[0]);",
-                        format_operand(dst, "U64"),
-                        src.reg.value - ZYDIS_REGISTER_XMM0);
-                }
+            // 8. XMM to Register (MOVQ to GP from XMM)
+            else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                ZydisRegisterGetClass(src.reg.value) == ZYDIS_REGCLASS_XMM &&
+                dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                auto src_idx = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\t{} = ctx.xmm[{}].u64[0];", format_operand(dst, "U64"), src_idx);
             }
         }
         break;
@@ -1869,8 +1876,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVUPS:
-        if (insn.insn.operand_count >= 2)
-        {
+        if (insn.insn.operand_count >= 2) {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
@@ -1878,19 +1884,23 @@ bool Recompiler::Recompile(
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tX86_MOVAPS_REG({}, {});", static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_XMM0), static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_XMM0));
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].reg = ctx.xmm[{}].reg;", dst_reg, src_reg);
             }
             // MOVUPS xmm1, [mem] (XMM ← memory)
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                println("\tX86_MOVUPS({}, {});", static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_XMM0), ea(src));
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].reg = X86_LOAD_PS({});", dst_reg, ea(src));
             }
             // MOVUPS [mem], xmm1 (memory ← XMM)
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tX86_MOVUPS_STORE({}, {});", ea(dst), static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_XMM0));
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tX86_STORE_PS({}, ctx.xmm[{}].reg);", ea(dst), src_reg);
             }
         }
         break;
@@ -1930,22 +1940,24 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVLPS:
-        if (insn.insn.operand_count >= 2) {
+        if (insn.insn.operand_count >= 2) 
+        {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                 // movlps xmm, [mem] - Loads two single-precision values into the lower half of XMM
-                println("\t\t__m128 temp_{} = ctx.xmm[{}];", base, dst.reg.value - ZYDIS_REGISTER_XMM0);
-                println("\t\t((float*)&temp_{})[0] = X86_LOAD_F32({});", base, ea(src));
-                println("\t\t((float*)&temp_{})[1] = X86_LOAD_F32({} + 4);", base, ea(src));
-                println("\t\tctx.xmm[{}] = temp_{};", dst.reg.value - ZYDIS_REGISTER_XMM0, base);
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].f32[0] = X86_LOAD_F32({});", dst_reg, ea(src));
+                println("\tctx.xmm[{}].f32[1] = X86_LOAD_F32({} + 4);", dst_reg, ea(src));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tX86_STORE_F32({}, ((float*)&ctx.xmm[{}])[0]);", ea(dst), src.reg.value - ZYDIS_REGISTER_XMM0);
-                println("\tX86_STORE_F32({} + 4, ((float*)&ctx.xmm[{}])[1]);", ea(dst), src.reg.value - ZYDIS_REGISTER_XMM0);
+                // movlps [mem], xmm - Stores two single-precision values from the lower half of XMM
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tX86_STORE_F32({}, ctx.xmm[{}].f32[0]);", ea(dst), src_reg);
+                println("\tX86_STORE_F32({} + 4, ctx.xmm[{}].f32[1]);", ea(dst), src_reg);
             }
         }
         break;
@@ -1955,34 +1967,28 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-
-                println("\t\t__m128 temp_{} = ctx.xmm[{}];", base, dst.reg.value - ZYDIS_REGISTER_XMM0);
-                println("\t\t((float*)&temp_{})[2] = X86_LOAD_F32({});", base, ea(src));
-                println("\t\t((float*)&temp_{})[3] = X86_LOAD_F32({} + 4);", base, ea(src));
-                println("\t\tctx.xmm[{}] = temp_{};", dst.reg.value - ZYDIS_REGISTER_XMM0, base);
+                src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].f32[2] = X86_LOAD_F32({});", dst_reg, ea(src));
+                println("\tctx.xmm[{}].f32[3] = X86_LOAD_F32({} + 4);", dst_reg, ea(src));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                // movhps [mem], xmm - Stores two single-precision values from the upper half of XMM
-                println("\tX86_STORE_F32({}, ((float*)&ctx.xmm[{}])[2]);", ea(dst), src.reg.value - ZYDIS_REGISTER_XMM0);
-                println("\tX86_STORE_F32({} + 4, ((float*)&ctx.xmm[{}])[3]);", ea(dst), src.reg.value - ZYDIS_REGISTER_XMM0);
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tX86_STORE_F32({}, ctx.xmm[{}].f32[2]);", ea(dst), src_reg);
+                println("\tX86_STORE_F32({} + 4, ctx.xmm[{}].f32[3]);", ea(dst), src_reg);
             }
         }
         break;
     case ZYDIS_MNEMONIC_MOVNTPS:
-        if (insn.insn.operand_count >= 2)
+        if (insn.insn.operand_count >= 2 &&
+            insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+            insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
-            const auto& dst = insn.operands[0];
-            const auto& src = insn.operands[1];
-
-            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
-            {
-                println("\tX86_MOVNTPS({}, {});",
-                    ea(dst),
-                    src.reg.value - ZYDIS_REGISTER_XMM0);
-            }
+            const int src_reg = insn.operands[1].reg.value - ZYDIS_REGISTER_XMM0;
+            println("\tX86_STORE_NTPS({}, ctx.xmm[{}].reg);",
+                ea(insn.operands[0]), src_reg);
         }
         break;
     case ZYDIS_MNEMONIC_CMP:
@@ -2023,6 +2029,51 @@ bool Recompiler::Recompile(
                 std::string rhs = format_operand(insn.operands[1], size_suffix);
                 println("\tctx.eflags.update_compare_flags_{}({}, {});", size_suffix, lhs, rhs);
             }
+        }
+        break;
+    case ZYDIS_MNEMONIC_CMPSS:
+        if (insn.insn.operand_count >= 3)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const auto& imm = insn.operands[2];
+
+            // Get comparison type from immediate value
+            uint8_t cmp_type = (imm.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) ?
+                static_cast<uint8_t>(imm.imm.value.u) & 0x7 : 0;
+
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+
+            const char* cmp_func = "";
+            switch (cmp_type) {
+            case 0: cmp_func = "_mm_cmpeq_ss"; break;    // Equal
+            case 1: cmp_func = "_mm_cmplt_ss"; break;    // Less than
+            case 2: cmp_func = "_mm_cmple_ss"; break;    // Less than or equal
+            case 3: cmp_func = "_mm_cmpunord_ss"; break; // Unordered
+            case 4: cmp_func = "_mm_cmpneq_ss"; break;   // Not equal
+            case 5: cmp_func = "_mm_cmpnlt_ss"; break;   // Not less than
+            case 6: cmp_func = "_mm_cmpnle_ss"; break;   // Not less than or equal
+            case 7: cmp_func = "_mm_cmpord_ss"; break;   // Ordered
+            }
+
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\tctx.xmm[{}].reg = {}(ctx.xmm[{}].reg, ctx.xmm[{}].reg);",
+                    dst_reg,
+                    cmp_func,
+                    dst_reg,
+                    src.reg.value - ZYDIS_REGISTER_XMM0);
+            }
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) 
+            {
+                println("\t\tfloat cmp_val_{} = X86_LOAD_F32({});", base, ea(src));
+                println("\t\t__m128 src_reg = _mm_load_ss(&cmp_val_{});", base);
+                println("\t\tctx.xmm[{}].reg = {}(ctx.xmm[{}].reg, src_reg);",
+                    dst_reg,
+                    cmp_func,
+                    dst_reg);
+            }
+            println("\tctx.handle_sse_exceptions();");
         }
         break;
     case ZYDIS_MNEMONIC_CMOVNZ:
@@ -2206,8 +2257,9 @@ bool Recompiler::Recompile(
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
+                println("\tfloat tmp_{} = X86_LOAD_F32({});", base, ea(src)); // Load into a local float
 
-                println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)(&X86_LOAD_F32({}))));", get_x86_reg(dst.reg.value), ea(src));
+                println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)(&tmp_{})));", get_x86_reg(dst.reg.value), base);
             }
         }
         break;
@@ -2240,14 +2292,12 @@ bool Recompiler::Recompile(
         println("\tctx.eax.u32 = (int32_t)(int16_t)ctx.eax.u16;");
         break;
     case ZYDIS_MNEMONIC_FILD:
-        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
-        {
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
             println("\tctx.fpu.clear_flags();");
-            println("\tctx.fpu.push(static_cast<double>(X86_LOAD_U32({})));",
+            println("\tctx.fpu.push(static_cast<long double>(static_cast<int32_t>(X86_LOAD_U32({}))));",
                 ea(insn.operands[0]));
         }
         break;
-
     case ZYDIS_MNEMONIC_FADD:
         floatOperations("+");
         break;
@@ -2857,7 +2907,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_ADDSS:  //float
-        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "+=");
+        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "_mm_add_ss", base);
         break;
     case ZYDIS_MNEMONIC_SUB:
         if (insn.insn.operand_count >= 2) 
@@ -2922,7 +2972,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_SUBSS:
-        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "-=");
+        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "_mm_sub_ss", base);
         break;
     case ZYDIS_MNEMONIC_JMP:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -3315,7 +3365,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_DIVSS:
-        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "/=");
+        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "_mm_div_ss", base);
         break;
     case ZYDIS_MNEMONIC_DEC:
         if (insn.insn.operand_count >= 1) {
@@ -3375,7 +3425,7 @@ bool Recompiler::Recompile(
         println("\tctx.ebp.u32 = X86_POP(ctx, base);");
         break;
     case ZYDIS_MNEMONIC_RDTSC:
-        //println("\tctx.eax.u64 = static_cast<uint32_t>(__rdtsc());");
+        println("\tctx.eax.u64 = static_cast<uint32_t>(__rdtsc());");
         break;
     case ZYDIS_MNEMONIC_STOSD:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP)
@@ -3466,34 +3516,31 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MOVAPS:
-        if (insn.insn.operand_count >= 2)
-        {
+        if (insn.insn.operand_count >= 2) {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
-            // MOVAPS xmm1, xmm2 (XMM ← XMM)
+            // Register to register move
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tX86_MOVAPS_REG({}, {});",
-                    static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_XMM0),
-                    static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_XMM0));
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].reg = ctx.xmm[{}].reg;", dst_reg, src_reg);
             }
-            // MOVAPS xmm1, [mem] (XMM ← memory)
+            // Memory to register (aligned load)
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                println("\tX86_MOVAPS({}, {});",
-                    static_cast<unsigned>(dst.reg.value - ZYDIS_REGISTER_XMM0),
-                    ea(src));
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tctx.xmm[{}].reg = X86_LOAD_APS({});", dst_reg, ea(src));
             }
-            // MOVAPS [mem], xmm1 (memory ← XMM)
+            // Register to memory (aligned store)
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tX86_MOVAPS_STORE({}, {});",
-                    ea(dst),
-                    static_cast<unsigned>(src.reg.value - ZYDIS_REGISTER_XMM0));
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tX86_STORE_APS({}, ctx.xmm[{}].reg);", ea(dst), src_reg);
             }
         }
         break;
@@ -3570,7 +3617,34 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_MULSS:
-        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "*=");
+        HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "_mm_mul_ss", base);
+        break;
+    case ZYDIS_MNEMONIC_RSQRTSS:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
+
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
+                if (dst_reg == src_reg) {
+                    println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, src_reg);
+                }
+                else {
+                    println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, ctx.xmm[{}].reg);", dst_reg, dst_reg, src_reg);
+                    println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, dst_reg);
+                }
+            }
+            else {
+                println("\tfloat rsqrt_{} = X86_LOAD_F32({});", base, ea(src));
+                println("\t__m128 tmp_{} = _mm_load_ss(&rsqrt_{});", base, base);
+                println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, tmp_{});", dst_reg, dst_reg, base);
+                println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, dst_reg);
+            }
+            println("\tctx.handle_sse_exceptions();");
+        }
         break;
     case ZYDIS_MNEMONIC_SAR:
         if (insn.insn.operand_count >= 2)
@@ -3706,31 +3780,34 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
-            println("\t\tvalUint640 = MMX_REG({}, {});", dst.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_MM0;
+
+            println("\tvalUint640 = MMX_REG({});", dst_reg);
             if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t\tvalUint641 = MMX_REG({}, {});", src.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+                println("\tvalUint641 = MMX_REG({});", src.reg.value - ZYDIS_REGISTER_MM0);
             }
             else {
-                println("\t\tvalUint641 = X86_LOAD_U64({});", ea(src));
+                println("\tvalUint641 = X86_LOAD_U64({});", ea(src));
             }
-            println("\t\tMMX_REG({}, {}) = ((valUint640 >> 32) & 0xFFFFFFFF) | ((valUint641 & 0xFFFFFFFF) << 32);",
-                dst.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+            println("\t\tMMX_REG({}) = ((valUint640 >> 32) & 0xFFFFFFFF) | ((valUint641 & 0xFFFFFFFF) << 32);",
+                dst_reg);
         }
         break;
     case ZYDIS_MNEMONIC_PUNPCKLDQ: // Parallel Unpack Low Doubleword
         if (insn.insn.operand_count >= 2) {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_MM0;
 
-            println("\t\tvalUint640 = MMX_REG({}, {});", dst.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+            println("\tvalUint640 = MMX_REG({});", dst_reg);
             if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t\tvalUint641 = MMX_REG({}, {});", src.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+                println("\tvalUint641 = MMX_REG({});", src.reg.value - ZYDIS_REGISTER_MM0);
             }
             else {
-                println("\t\tvalUint641 = X86_LOAD_U64({});", ea(src));
+                println("\tvalUint641 = X86_LOAD_U64({});", ea(src));
             }
-            println("\t\tMMX_REG({}, {}) = (valUint640 & 0xFFFFFFFF) | ((valUint641 & 0xFFFFFFFF) << 32);",
-                dst.reg.value - ZYDIS_REGISTER_MM0, (int)ZYDIS_REGISTER_MM0);
+            println("\tMMX_REG({}) = (valUint640 & 0xFFFFFFFF) | ((valUint641 & 0xFFFFFFFF) << 32);",
+                dst_reg);
         }
         break;
     case ZYDIS_MNEMONIC_XCHG:
@@ -4504,41 +4581,43 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_INT3:
         break;
     case ZYDIS_MNEMONIC_UNPCKLPS:
-        if (insn.insn.operand_count >= 2) 
+        if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\tctx.xmm[{0}] = _mm_unpacklo_ps(ctx.xmm[{0}], ctx.xmm[{1}]);",
-                    dst.reg.value - ZYDIS_REGISTER_XMM0,
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\tctx.xmm[{}].reg = _mm_unpacklo_ps(ctx.xmm[{}].reg, ctx.xmm[{}].reg);",
+                    dst_reg,
+                    dst_reg,
                     src.reg.value - ZYDIS_REGISTER_XMM0);
             }
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\tctx.xmm[{0}] = _mm_unpacklo_ps(ctx.xmm[{0}], _mm_loadu_ps((const float*)({1})));",
-                    dst.reg.value - ZYDIS_REGISTER_XMM0,
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\tctx.xmm[{}].reg = _mm_unpacklo_ps(ctx.xmm[{}].reg, X86_LOAD_PS({}));",
+                    dst_reg,
+                    dst_reg,
                     ea(src));
             }
         }
         break;
     case ZYDIS_MNEMONIC_UNPCKHPS:
-        if (insn.insn.operand_count >= 2) 
+        if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
+            const int dst_reg = dst.reg.value - ZYDIS_REGISTER_XMM0;
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\tctx.xmm[{0}] = _mm_unpackhi_ps(ctx.xmm[{0}], ctx.xmm[{1}]);",
-                    dst.reg.value - ZYDIS_REGISTER_XMM0,
+            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\tctx.xmm[{}].reg = _mm_unpackhi_ps(ctx.xmm[{}].reg, ctx.xmm[{}].reg);",
+                    dst_reg,
+                    dst_reg,
                     src.reg.value - ZYDIS_REGISTER_XMM0);
             }
-            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\tctx.xmm[{0}] = _mm_unpackhi_ps(ctx.xmm[{0}], _mm_loadu_ps((const float*)({1})));",
-                    dst.reg.value - ZYDIS_REGISTER_XMM0,
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\tctx.xmm[{}].reg = _mm_unpackhi_ps(ctx.xmm[{}].reg, X86_LOAD_PS({}));",
+                    dst_reg,
+                    dst_reg,
                     ea(src));
             }
         }
@@ -4668,7 +4747,6 @@ bool Recompiler::Recompile(const Function& fn)
 #endif
 
     println("X86_FUNC_IMPL(__imp__{}) {{", name);
-    //println("\tX86_FUNC_PROLOGUE();");
 
     auto switchTable = config.switchTables.end();
     bool allRecompiled = true;
