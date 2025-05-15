@@ -708,7 +708,7 @@ struct X87FPU
 
     long double round_to_control(long double value) const
     {
-        switch ((cw >> 8) & 0x3) 
+        switch ((cw >> 8) & 0x3)
         {
         case 0x0: // 24-bit single precision (float)
             value = static_cast<long double>(static_cast<float>(value));
@@ -720,16 +720,16 @@ struct X87FPU
         }
 
         switch ((cw >> 10) & 0x3) {
-        case 0x0: 
+        case 0x0:
             value = std::nearbyintl(value);
             break;
-        case 0x1: 
+        case 0x1:
             value = std::floorl(value);
             break;
-        case 0x2: 
+        case 0x2:
             value = std::ceill(value);
             break;
-        case 0x3: 
+        case 0x3:
             value = std::truncl(value);
             break;
         }
@@ -757,9 +757,9 @@ struct X87FPU
 
 
 union XmmRegister {
-    __m128 reg;      
-    float f32[4];    
-    uint32_t u32[4]; 
+    __m128 reg;
+    float f32[4];
+    uint32_t u32[4];
     uint64_t u64[2];
 };
 
@@ -860,6 +860,7 @@ inline __m128i X86_AVG_EPU16(__m128i a, __m128i b)
     return _mm_avg_epu16(a, b);
 }
 
+
 inline uint64_t X86_PSHUFW(uint64_t src, uint8_t control)
 {
     const uint16_t w0 = (src >> (0 * 16)) & 0xFFFF;
@@ -874,6 +875,56 @@ inline uint64_t X86_PSHUFW(uint64_t src, uint8_t control)
         ((uint64_t)ws[(control >> 2) & 3] << 16) |  // Word 1
         ((uint64_t)ws[(control >> 4) & 3] << 32) |  // Word 2
         ((uint64_t)ws[(control >> 6) & 3] << 48);   // Word 3
+}
+
+//todo check if all these functions and their instructions are correct
+inline uint64_t X86_PADDW(uint64_t src_val, uint64_t dst_val)
+{
+    uint64_t result = 0;
+
+    for (int i = 0; i < 4; i++)
+    {
+        uint16_t src_word = (src_val >> (i * 16)) & 0xFFFF;
+        uint16_t dst_word = (dst_val >> (i * 16)) & 0xFFFF;
+        uint16_t res_word = src_word + dst_word;
+        result |= (static_cast<uint64_t>(res_word) << (i * 16));
+    }
+
+    return result;
+}
+
+inline uint64_t X86_PSRAW(uint64_t shift_val, uint64_t dst_val)
+{
+    uint64_t result = 0;
+
+    for (int i = 0; i < 4; i++)
+    {
+        int16_t word = (dst_val >> (i * 16)) & 0xFFFF;
+        int16_t shifted = word >> shift_val;
+        result |= (static_cast<uint64_t>(shifted & 0xFFFF) << (i * 16));
+    }
+
+    return result;
+}
+
+inline uint64_t X86_PACKUSWB(uint64_t dst_val, uint64_t src_val)
+{
+    uint64_t result = 0;
+    for (int i = 0; i < 4; i++) {
+
+        int16_t word = (dst_val >> (i * 16)) & 0xFFFF;
+        uint8_t byte = (word < 0) ? 0 : ((word > 255) ? 255 : static_cast<uint8_t>(word));
+        result |= static_cast<uint64_t>(byte) << (i * 8);
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        int16_t word = (src_val >> (i * 16)) & 0xFFFF;
+        uint8_t byte = (word < 0) ? 0 : ((word > 255) ? 255 : static_cast<uint8_t>(word));
+        result |= static_cast<uint64_t>(byte) << ((i + 4) * 8);
+    }
+
+    return result;
 }
 
 #endif // X86_CONTEXT_H_INCLUDED
