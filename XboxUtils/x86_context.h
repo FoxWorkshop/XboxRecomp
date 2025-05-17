@@ -753,6 +753,27 @@ struct X87FPU
 
         while (pops--) pop();
     }
+
+    void compare_and_set_eflags(long double lhs, long double rhs, X86EFlags& eflags) 
+    {
+        if (std::isnan(lhs) || std::isnan(rhs)) 
+        {
+            eflags.value |= X86EFlags::ZF | X86EFlags::PF | X86EFlags::CF;
+        }
+        else if (lhs > rhs) {
+            eflags.value &= ~(X86EFlags::ZF | X86EFlags::CF);
+        }
+        else if (lhs < rhs) 
+        {
+            eflags.value |= X86EFlags::CF;
+            eflags.value &= ~X86EFlags::ZF;
+        }
+        else {
+            eflags.value |= X86EFlags::ZF;
+            eflags.value &= ~X86EFlags::CF;
+        }
+    }
+
 };
 
 
