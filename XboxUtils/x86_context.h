@@ -88,6 +88,15 @@
 #define X86_MMX_STORE(addr, value) (*reinterpret_cast<uint64_t*>(base + addr) = value)
 #define MMX_REG(reg) (ctx.fpu.mmx[(reg)]) 
 
+#define X86_ATOMIC_XCHG_U8(addr, value)  std::atomic_exchange(reinterpret_cast<std::atomic<uint8_t>*>(base + (addr)), static_cast<uint8_t>(value))
+#define X86_ATOMIC_XCHG_U16(addr, value) std::atomic_exchange(reinterpret_cast<std::atomic<uint16_t>*>(base + (addr)), static_cast<uint16_t>(value))
+#define X86_ATOMIC_XCHG_U32(addr, value) std::atomic_exchange(reinterpret_cast<std::atomic<uint32_t>*>(base + (addr)), static_cast<uint32_t>(value))
+
+#define X86_ATOMIC_XADD_U8(addr, value)  std::atomic_fetch_add(reinterpret_cast<std::atomic<uint8_t>*>(base + (addr)), static_cast<uint8_t>(value))
+#define X86_ATOMIC_XADD_U16(addr, value) std::atomic_fetch_add(reinterpret_cast<std::atomic<uint16_t>*>(base + (addr)), static_cast<uint16_t>(value))
+#define X86_ATOMIC_XADD_U32(addr, value) std::atomic_fetch_add(reinterpret_cast<std::atomic<uint32_t>*>(base + (addr)), static_cast<uint32_t>(value))
+
+
 #ifndef X86_CALL_FUNC
 #define X86_CALL_FUNC(x) x(ctx, base)
 #endif
@@ -857,6 +866,11 @@ inline uint32_t X86_POP(X86Context& ctx, uint8_t* base)
     return value;
 }
 
+inline bool X86_ATOMIC_CMPXCHG_U32(uint8_t* base, uint32_t addr, uint32_t& eax_val, uint32_t desired_val)
+{
+    auto* ptr = reinterpret_cast<std::atomic<uint32_t>*>(base + addr);
+    return std::atomic_compare_exchange_strong(ptr, &eax_val, desired_val);
+}
 
 // Flag Macros
 #define SET_FLAG(flag, condition) (ctx.RFLAGS = (condition) ? (ctx.RFLAGS | (flag)) : (ctx.RFLAGS & ~(flag)))
