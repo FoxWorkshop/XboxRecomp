@@ -3590,7 +3590,7 @@ bool Recompiler::Recompile(
 
                         println("\tauto {} = {} + {};", temp_res, temp_old, temp_src);
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
-                        println("\tctx.eflags.update_flags_add({}, {}, {});", temp_old, temp_src, temp_res);
+                println("\tctx.eflags.update_flags_add_{}({}, {}, {});", size_suffix, temp_old, temp_src, temp_res);
                     }
                     else
                     { // Register destination
@@ -3614,7 +3614,7 @@ bool Recompiler::Recompile(
 
                         // Perform the addition
                         println("\t{} = {} + {};", dst_reg, temp_old, temp_src);
-                        println("\tctx.eflags.update_flags_add({}, {}, {});", temp_old, temp_src, dst_reg);
+                println("\tctx.eflags.update_flags_add_{}({}, {}, {});", size_suffix, temp_old, temp_src, dst_reg);
                     }
                 }
                 break;
@@ -3654,7 +3654,7 @@ bool Recompiler::Recompile(
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
 
                         // Update flags properly
-                        println("\tctx.eflags.update_flags_sub({}, {}, {});", temp_old, temp_src, temp_res);
+                println("\tctx.eflags.update_flags_sub_{}({}, {}, {});", size_suffix, temp_old, temp_src, temp_res);
                     }
                     else { // Register destination
                         std::string dst_reg = get_x86_reg(dst.reg.value);
@@ -3679,7 +3679,7 @@ bool Recompiler::Recompile(
                         println("\t{} = {} - {};", dst_reg, temp_old, temp_src);
 
                         // Update flags properly
-                        println("\tctx.eflags.update_flags_sub({}, {}, {});", temp_old, temp_src, dst_reg);
+                println("\tctx.eflags.update_flags_sub_{}({}, {}, {});", size_suffix, temp_old, temp_src, dst_reg);
                     }
                 }
                 break;
@@ -3926,6 +3926,31 @@ bool Recompiler::Recompile(
                             throw std::runtime_error("Unsupported operand in IMUL");
                     };
 
+
+        // Helper function to generate overflow check based on operand size
+        auto generate_overflow_check = [&](const std::string& temp_result, int operand_size) -> std::string
+            {
+                switch (operand_size) {
+                case 8:
+                    return fmt::format("(({} < INT8_MIN || {} > INT8_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
+                        temp_result, temp_result);
+                case 16:
+                    return fmt::format("(({} < INT16_MIN || {} > INT16_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
+                        temp_result, temp_result);
+                case 32:
+                    return fmt::format("(({} < INT32_MIN || {} > INT32_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
+                        temp_result, temp_result);
+                case 64:
+                    // For 64-bit, we need to check if the result fits in the signed range
+                    // This is more complex and would need 128-bit arithmetic
+                    return fmt::format("((static_cast<uint64_t>({}) > static_cast<uint64_t>(INT64_MAX) && "
+                        "static_cast<uint64_t>({}) < static_cast<uint64_t>(INT64_MIN)) ? "
+                        "(X86EFlags::CF | X86EFlags::OF) : 0)", temp_result, temp_result);
+                default:
+                    throw std::runtime_error(fmt::format("Unsupported operand size: {} bits", operand_size));
+                }
+            };
+
                 // First, classify the actual IMUL form we're dealing with
                 enum ImulForm {
                     IMUL_UNKNOWN,
@@ -3972,13 +3997,38 @@ bool Recompiler::Recompile(
                     const auto& src = insn.operands[0];
                     std::string rhs = get_operand_str(src);
                     std::string temp_result = fmt::format("imul_result_{:X}", base);
+            int operand_size = src.size;
 
+            if (operand_size == 32) {
+                // 32-bit * 32-bit = 64-bit result
                     println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>(ctx.eax.u32)) * "
                         "static_cast<int64_t>(static_cast<int32_t>({}));", temp_result, rhs);
-                    println("\tctx.eax.u32 = static_cast<uint32_t>({} & 0xFFFFFFFF);", temp_result);
+                println("\tctx.eax.u32 = static_cast<uint32_t>({} & 0xFFFFFFFFULL);", temp_result);
                     println("\tctx.edx.u32 = static_cast<uint32_t>(static_cast<uint64_t>({}) >> 32);", temp_result);
+                // For EAX*EDX form, overflow occurs when high part (EDX) is not sign extension of low part (EAX)
                     println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                        "((({} >> 31) != ctx.edx.u32) ? (X86EFlags::CF | X86EFlags::OF) : 0);", temp_result);
+                    "((static_cast<int32_t>(ctx.edx.u32) != (static_cast<int32_t>(ctx.eax.u32) >> 31)) ? "
+                    "(X86EFlags::CF | X86EFlags::OF) : 0);");
+            }
+            else if (operand_size == 16) {
+                // 16-bit * 16-bit = 32-bit result (AX * op -> DX:AX)
+                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>(ctx.eax.u16)) * "
+                    "static_cast<int32_t>(static_cast<int16_t>({}));", temp_result, rhs);
+                println("\tctx.eax.u16 = static_cast<uint16_t>({} & 0xFFFF);", temp_result);
+                println("\tctx.edx.u16 = static_cast<uint16_t>(static_cast<uint32_t>({}) >> 16);", temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "((static_cast<int16_t>(ctx.edx.u16) != (static_cast<int16_t>(ctx.eax.u16) >> 15)) ? "
+                    "(X86EFlags::CF | X86EFlags::OF) : 0);");
+            }
+            else if (operand_size == 8) {
+                // 8-bit * 8-bit = 16-bit result (AL * op -> AX)
+                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>(ctx.eax.u8_lo)) * "
+                    "static_cast<int16_t>(static_cast<int8_t>({}));", temp_result, rhs);
+                println("\tctx.eax.u16 = static_cast<uint16_t>({});", temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "(({} < INT8_MIN || {} > INT8_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0);",
+                    temp_result, temp_result);
+            }
                     break;
                 }
                 case IMUL_REG_REG:
@@ -3989,13 +4039,29 @@ bool Recompiler::Recompile(
                     std::string lhs = get_x86_reg(dst.reg.value);
                     std::string rhs = get_operand_str(src);
                     std::string temp_result = fmt::format("imul_result_{:X}", base);
+            int operand_size = dst.size;
 
+            if (operand_size == 32) {
                     println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
                         "static_cast<int64_t>(static_cast<int32_t>({}));", temp_result, lhs, rhs);
                     println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
                     println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                        "((static_cast<int64_t>(static_cast<int32_t>({})) != {}) ? "
-                        "(X86EFlags::CF | X86EFlags::OF) : 0);", lhs, temp_result);
+                    "{};", generate_overflow_check(temp_result, 32));
+            }
+            else if (operand_size == 16) {
+                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
+                    "static_cast<int32_t>(static_cast<int16_t>({}));", temp_result, lhs, rhs);
+                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 16));
+            }
+            else if (operand_size == 8) {
+                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
+                    "static_cast<int16_t>(static_cast<int8_t>({}));", temp_result, lhs, rhs);
+                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 8));
+            }
                     break;
                 }
 
@@ -4006,13 +4072,29 @@ bool Recompiler::Recompile(
                     std::string lhs = get_x86_reg(dst.reg.value);
                     std::string imm_str = get_operand_str(imm);
                     std::string temp_result = fmt::format("imul_result_{:X}", base);
+            int operand_size = dst.size;
 
+            if (operand_size == 32) {
                     println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
                         "static_cast<int64_t>({});", temp_result, lhs, imm_str);
                     println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
                     println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                        "((static_cast<int64_t>(static_cast<int32_t>({})) != {}) ? "
-                        "(X86EFlags::CF | X86EFlags::OF) : 0);", lhs, temp_result);
+                    "{};", generate_overflow_check(temp_result, 32));
+            }
+            else if (operand_size == 16) {
+                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
+                    "static_cast<int32_t>({});", temp_result, lhs, imm_str);
+                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 16));
+            }
+            else if (operand_size == 8) {
+                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
+                    "static_cast<int16_t>({});", temp_result, lhs, imm_str);
+                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 8));
+            }
                     break;
                 }
 
@@ -4025,13 +4107,29 @@ bool Recompiler::Recompile(
                     std::string rhs = get_operand_str(src);
                     std::string imm_str = get_operand_str(imm);
                     std::string temp_result = fmt::format("imul_result_{:X}", base);
+            int operand_size = dst.size;
 
+            if (operand_size == 32) {
                     println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
                         "static_cast<int64_t>({});", temp_result, rhs, imm_str);
                     println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
                     println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                        "((static_cast<int64_t>(static_cast<int32_t>({})) != {}) ? "
-                        "(X86EFlags::CF | X86EFlags::OF) : 0);", lhs, temp_result);
+                    "{};", generate_overflow_check(temp_result, 32));
+            }
+            else if (operand_size == 16) {
+                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
+                    "static_cast<int32_t>({});", temp_result, rhs, imm_str);
+                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 16));
+            }
+            else if (operand_size == 8) {
+                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
+                    "static_cast<int16_t>({});", temp_result, rhs, imm_str);
+                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
+                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
+                    "{};", generate_overflow_check(temp_result, 8));
+            }
                     break;
                 }
 
@@ -4130,7 +4228,7 @@ bool Recompiler::Recompile(
                         std::string oldval = get_temp_reg(op.size);
                         println("\tauto {} = {};", oldval, get_x86_reg(op.reg.value));
                         println("\t{}++;", get_x86_reg(op.reg.value));
-                        println("\tctx.eflags.update_flags_inc({}, {});", oldval, get_x86_reg(op.reg.value));
+                println("\tctx.eflags.update_flags_inc_{}({}, {});", size_suffix, oldval, get_x86_reg(op.reg.value));
                     }
                     else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                         std::string temp_old = get_temp_reg(op.size) + "_OLD";
@@ -4140,7 +4238,7 @@ bool Recompiler::Recompile(
                         println("\tauto {} = {};", temp_res, temp_old);
                         println("\t{}++;", temp_res);
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                        println("\tctx.eflags.update_flags_inc({}, {});", temp_old, temp_res);
+                println("\tctx.eflags.update_flags_inc_{}({}, {});", size_suffix, temp_old, temp_res);
                     }
                 }
                 break;
@@ -4156,7 +4254,7 @@ bool Recompiler::Recompile(
                         std::string oldval = get_temp_reg(op.size);
                         println("\tauto {} = {};", oldval, get_x86_reg(op.reg.value));
                         println("\t{}--;", get_x86_reg(op.reg.value));
-                        println("\tctx.eflags.update_flags_dec({}, {});", oldval, get_x86_reg(op.reg.value));
+                println("\tctx.eflags.update_flags_dec_{}({}, {});", size_suffix, oldval, get_x86_reg(op.reg.value));
                     }
                     else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                         std::string temp_old = get_temp_reg(op.size) + "_OLD";
@@ -4166,7 +4264,7 @@ bool Recompiler::Recompile(
                         println("\tauto {} = {};", temp_res, temp_old);
                         println("\t{}--;", temp_res);
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                        println("\tctx.eflags.update_flags_dec({}, {});", temp_old, temp_res);
+                println("\tctx.eflags.update_flags_dec_{}({}, {});", size_suffix, temp_old, temp_res);
                     }
                 }
                 break;
@@ -4527,7 +4625,7 @@ bool Recompiler::Recompile(
 
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
 
-                        println("\tctx.eflags.update_flags_sub({}, {} + cf_value_{}, {});", temp_old, temp_src, base, temp_res);
+                println("\tctx.eflags.update_flags_sub_{}({}, {} + cf_value_{}, {});", size_suffix, temp_old, temp_src, base, temp_res);
                     }
                     else { // Register destination
                         std::string dst_reg = get_x86_reg(dst.reg.value);
@@ -4551,7 +4649,7 @@ bool Recompiler::Recompile(
 
                         // Perform the subtraction with borrow
                         println("\t{} = {} - ({} + cf_value_{});", dst_reg, temp_old, temp_src, base);
-                        println("\tctx.eflags.update_flags_sub({}, {} + cf_value_{}, {});", temp_old, temp_src, base, dst_reg);
+                println("\tctx.eflags.update_flags_sub_{}({}, {} + cf_value_{}, {});", size_suffix, temp_old, temp_src, base, dst_reg);
                     }
                 }
                 break;
@@ -4739,6 +4837,32 @@ bool Recompiler::Recompile(
                             println("\tctx.xmm[{}].reg = _mm_add_epi16(_mm_castps_si128(ctx.xmm[{}].reg), src_val_{});", dst_idx, dst_idx, base);
                             println("\tctx.xmm[{}].reg = _mm_castsi128_ps(ctx.xmm[{}].reg);", dst_idx, dst_idx);
                         }
+            }
+        }
+        break;
+    case ZYDIS_MNEMONIC_PAVGB:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            // PAVGB mm1, mm2 (MMX ← MMX)
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_MM0;
+                const int src_reg = src.reg.value - ZYDIS_REGISTER_MM0;
+                println("\tuint64_t dst_val_{} = MMX_REG({});", base, dst_reg);
+                println("\tuint64_t src_val_{} = MMX_REG({});", base, src_reg);
+                println("\tMMX_REG({}) = X86_PAVGB(dst_val_{}, src_val_{});", dst_reg, base, base);
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                const int dst_reg = dst.reg.value - ZYDIS_REGISTER_MM0;
+                println("\tuint64_t dst_val_{} = MMX_REG({});", base, dst_reg);
+                println("\tuint64_t src_val_{} = X86_MMX_LOAD({});", base, ea(src));
+                println("\tMMX_REG({}) = X86_PAVGB(dst_val_{}, src_val_{});", dst_reg, base, base);
                     }
                 }
                 break;
@@ -4991,19 +5115,16 @@ bool Recompiler::Recompile(
                         {
                             println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
                             println("\t{} >>= {};", get_x86_reg(dst.reg.value), shift_count);
-                            println("\tctx.eflags.update_flags_shr({}, {}, {});", temp, shift_count,
-                                get_x86_reg(dst.reg.value));
+                    println("\tctx.eflags.update_flags_shr({}, {}, {});", temp, shift_count, get_x86_reg(dst.reg.value));
                         }
                         else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                         {
-                            // Load original value
+
                             println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
 
                             // Perform shift and store
                             println("\tX86_STORE_{}({}, {} >> {});", size_suffix, ea(dst), temp, shift_count);
-
-                            println("\tctx.eflags.update_flags_shr({}, {}, X86_LOAD_{}({}));",
-                                temp, shift_count, size_suffix, ea(dst));
+                    println("\tctx.eflags.update_flags_shr({}, {}, X86_LOAD_{}({}));", temp, shift_count, size_suffix, ea(dst));
                         }
                     }
                     else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -5118,7 +5239,7 @@ bool Recompiler::Recompile(
 
                         println("\tauto {} = {};", temp_old, reg);
                         println("\t{} = -{};", reg, reg);
-                        println("\tctx.eflags.update_flags_neg({}, {});", temp_old, reg);
+                println("\tctx.eflags.update_flags_neg_{}({}, {});", size_suffix, temp_old, reg);
                     }
                     else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
                     {
@@ -5128,7 +5249,7 @@ bool Recompiler::Recompile(
                         println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(op));
                         println("\tauto {} = -{};", temp_res, temp_old);
                         println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                        println("\tctx.eflags.update_flags_neg({}, {});", temp_old, temp_res);
+                println("\tctx.eflags.update_flags_neg_{}({}, {});", size_suffix, temp_old, temp_res);
                     }
                 }
                 break;
@@ -5642,7 +5763,7 @@ bool Recompiler::Recompile(
     std::unordered_set<std::string> instMissing;
     std::unordered_map<size_t, size_t> wrongAnalyse;
 
-    bool Recompiler::Recompile(const Function & fn)
+bool Recompiler::Recompile(const Function& fn)
     {
         auto base = fn.base;
         auto end = base + fn.size;
@@ -5911,7 +6032,7 @@ bool Recompiler::Recompile(
         return allRecompiled;
     }
 
-    void Recompiler::Recompile(const std::filesystem::path & headerFilePath)
+void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
     {
         out.reserve(10 * 1024 * 1024);
 
@@ -6048,7 +6169,7 @@ bool Recompiler::Recompile(
         SaveCurrentOutData();
     }
 
-    void Recompiler::SaveCurrentOutData(const std::string_view & name)
+void Recompiler::SaveCurrentOutData(const std::string_view& name)
     {
         if (!out.empty())
         {

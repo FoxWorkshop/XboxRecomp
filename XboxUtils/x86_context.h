@@ -151,18 +151,16 @@ struct X86EFlags
         OF = 1 << 11  // Overflow
     };
 
-
-
-    // Clear all flags affected by CMP
-    void clear_compare_flags()
+    //Clear all flags
+    void clear_eflags()
     {
         //value &= ~(CF | PF | ZF | SF | OF);
         value &= ~(CF | PF | AF | ZF | SF | OF);
     }
 
     void update_compare_flags_U32(uint32_t lhs, uint32_t rhs) {
-        clear_compare_flags();
-        // Calculate result and flags
+        clear_eflags();
+
         uint32_t result = lhs - rhs;
         bool carry = lhs < rhs;  // Unsigned overflow
 
@@ -190,7 +188,7 @@ struct X86EFlags
 
 
     void update_compare_flags_U16(uint16_t lhs, uint16_t rhs) {
-        clear_compare_flags();
+        clear_eflags();
 
         uint16_t result = lhs - rhs;
         bool carry = lhs < rhs;
@@ -213,7 +211,7 @@ struct X86EFlags
     }
 
     void update_compare_flags_U8(uint8_t lhs, uint8_t rhs) {
-        clear_compare_flags();
+        clear_eflags();
 
         uint8_t result = lhs - rhs;
         bool carry = lhs < rhs;
@@ -238,7 +236,7 @@ struct X86EFlags
 
     void update_compare_flags_sse(float lhs, float rhs)
     {
-        clear_compare_flags();
+        clear_eflags();
         const bool unordered = std::isnan(lhs) || std::isnan(rhs);
 
         // ZF: equal (including unordered)
@@ -258,30 +256,10 @@ struct X86EFlags
         value &= ~OF;
     }
 
-    void update_sub_flags(uint32_t lhs, uint32_t rhs, uint32_t result)
-    {
-        clear_compare_flags();
-        value &= ~(X86EFlags::CF | X86EFlags::PF | X86EFlags::AF | X86EFlags::ZF | X86EFlags::SF | X86EFlags::OF);
-
-        // CF: set if unsigned overflow (lhs < rhs)
-        value |= (lhs < rhs) ? X86EFlags::CF : 0;
-        // OF: Signed overflow
-        value |= (((lhs ^ rhs) & (lhs ^ result)) >> 31) ? X86EFlags::OF : 0;
-
-        // ZF: Result zero
-        value |= (result == 0) ? X86EFlags::ZF : 0;
-
-        // SF: Negative result
-        value |= (result & 0x80000000) ? X86EFlags::SF : 0;
-        uint8_t lsb = result & 0xFF;
-        value |= (__builtin_popcount(lsb) % 2 == 0) ? X86EFlags::PF : 0;
-        value |= ((lhs ^ rhs ^ result) & 0x10) ? X86EFlags::AF : 0;
-    }
-
 
     void update_test_flags(uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         if (result == 0)
             value |= ZF;
@@ -294,7 +272,7 @@ struct X86EFlags
     //and, or, xor etc.
     void update_flags_logic(uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         value |= (result == 0) ? ZF : 0;
         value |= (result >> 31) & SF;
@@ -305,7 +283,7 @@ struct X86EFlags
 
     void update_flags_adc(uint32_t lhs, uint32_t rhs, uint32_t carry, uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
         value |= ((result < lhs) || (result == lhs && carry == 1)) ? CF : 0;
         value |= (result == 0) ? ZF : 0;
         value |= (result >> 31) & SF;
@@ -315,21 +293,16 @@ struct X86EFlags
         value |= (((lhs & 0xF) + (rhs & 0xF) + carry) > 0xF) ? AF : 0;
     }
 
-    void update_flags_add(uint32_t lhs, uint32_t rhs, uint32_t result)
+    void update_flags_add_U32(uint32_t lhs, uint32_t rhs, uint32_t result)
     {
-        clear_compare_flags();
-
-        // Carry Flag: Set if result < either operand (unsigned overflow)
+        clear_eflags();
         value |= (result < lhs) ? CF : 0;
-
-        // Zero Flag: Set if result is zero
         value |= (result == 0) ? ZF : 0;
 
-        // Sign Flag: Set if result is negative (bit 31 is 1)
+
         value |= (result >> 31) & SF;
 
         // Overflow Flag: Set if signed overflow occurs (same sign inputs, different sign output)
-
         value |= ((((lhs ^ result) & (rhs ^ result)) >> 31) != 0) ? OF : 0;
 
         // Parity Flag: Set if result has even number of set bits in lowest byte
@@ -340,9 +313,60 @@ struct X86EFlags
         value |= (((lhs & 0xF) + (rhs & 0xF)) > 0xF) ? AF : 0;
     }
 
-    void update_flags_sub(uint32_t lhs, uint32_t rhs, uint32_t result)
+    void update_flags_add_U16(uint16_t lhs, uint16_t rhs, uint16_t result) 
     {
-        clear_compare_flags();
+        clear_eflags(); 
+
+        uint32_t full_result = (uint32_t)lhs + (uint32_t)rhs;
+        value |= (full_result > 0xFFFF) ? CF : 0;
+
+        value |= (result == 0) ? ZF : 0;
+
+        value |= (result & 0x8000) ? SF : 0;
+
+        // Overflow Flag: Set if signed overflow occurs
+        // For 16-bit: check if both operands have same sign but result has different sign
+        bool lhs_sign = (lhs & 0x8000) != 0;
+        bool rhs_sign = (rhs & 0x8000) != 0;
+        bool result_sign = (result & 0x8000) != 0;
+        value |= (lhs_sign == rhs_sign && lhs_sign != result_sign) ? OF : 0;
+
+        // Parity Flag: Set if result has even number of set bits in lowest byte
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+
+        // Auxiliary Flag: Set if carry from bit 3 to bit 4
+        value |= (((lhs & 0xF) + (rhs & 0xF)) > 0xF) ? AF : 0;
+    }
+
+    void update_flags_add_U8(uint8_t lhs, uint8_t rhs, uint8_t result) 
+    {
+        clear_eflags();
+
+        uint16_t full_result = (uint16_t)lhs + (uint16_t)rhs;
+        value |= (full_result > 0xFF) ? CF : 0;
+
+        value |= (result == 0) ? ZF : 0;
+
+        value |= (result & 0x80) ? SF : 0;
+
+        // Overflow Flag: Set if signed overflow occurs
+        // For 8-bit: check if both operands have same sign but result has different sign
+        bool lhs_sign = (lhs & 0x80) != 0;
+        bool rhs_sign = (rhs & 0x80) != 0;
+        bool result_sign = (result & 0x80) != 0;
+        value |= (lhs_sign == rhs_sign && lhs_sign != result_sign) ? OF : 0;
+
+        // Parity Flag: Set if result has even number of set bits
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+
+        // Auxiliary Flag: Set if carry from bit 3 to bit 4
+        value |= (((lhs & 0xF) + (rhs & 0xF)) > 0xF) ? AF : 0;
+    }
+
+    void update_flags_sub_U32(uint32_t lhs, uint32_t rhs, uint32_t result)
+    {
+        clear_eflags();
 
         // Special case: SUB X,0 is identical to TEST X,X (only affects SF/ZF/PF)
         if (rhs == 0)
@@ -364,18 +388,74 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
     }
 
+    void update_flags_sub_U16(uint16_t lhs, uint16_t rhs, uint16_t result) 
+    {
+        clear_eflags();
+
+        if (rhs == 0) {
+            value |= (result == 0) ? ZF : 0;
+            value |= (result & 0x8000) ? SF : 0;
+            uint8_t lsb = result & 0xFF;
+            value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+            return;  // Skip CF/OF/AF for this case!
+        }
+
+
+        value |= (lhs < rhs) ? CF : 0;
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x8000) ? SF : 0;
+
+        // Overflow Flag: Set if signed overflow occurs in subtraction
+        bool lhs_sign = (lhs & 0x8000) != 0;
+        bool rhs_sign = (rhs & 0x8000) != 0;
+        bool result_sign = (result & 0x8000) != 0;
+        value |= (lhs_sign != rhs_sign && lhs_sign != result_sign) ? OF : 0;
+
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
+    }
+
+    void update_flags_sub_U8(uint8_t lhs, uint8_t rhs, uint8_t result) 
+    {
+        clear_eflags();
+
+        // Special case: SUB X,0 is identical to TEST X,X (only affects SF/ZF/PF)
+        if (rhs == 0) 
+        {
+            value |= (result == 0) ? ZF : 0;
+            value |= (result & 0x80) ? SF : 0;
+            value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+            return;  // Skip CF/OF/AF for this case!
+        }
+
+        value |= (lhs < rhs) ? CF : 0;
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x80) ? SF : 0;
+
+        // Overflow Flag: Set if signed overflow occurs in subtraction
+        bool lhs_sign = (lhs & 0x80) != 0;
+        bool rhs_sign = (rhs & 0x80) != 0;
+        bool result_sign = (result & 0x80) != 0;
+        value |= (lhs_sign != rhs_sign && lhs_sign != result_sign) ? OF : 0;
+
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+        value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
+    }
+
     void update_flags_mul(bool overflow)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         if (overflow)
             value |= (CF | OF);
     }
 
-    void update_flags_inc(uint32_t old_val, uint32_t result) {
+    void update_flags_inc_U32(uint32_t old_val, uint32_t result) 
+    {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
-        clear_compare_flags();
+        clear_eflags();
         value |= saved_cf;
         value |= (result == 0) ? ZF : 0;
         value |= (result >> 31) & SF;
@@ -386,11 +466,40 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0) ? AF : 0;
     }
 
-    void update_flags_dec(uint32_t old_val, uint32_t result)
+    void update_flags_inc_U16(uint16_t old_val, uint16_t result) 
+    {
+
+        uint32_t saved_cf = value & CF;
+        clear_eflags();
+        value |= saved_cf;
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 15) ? SF : 0;  // Sign flag for 16-bit (bit 15)
+        // Overflow Flag (only if 0x7FFF -> 0x8000)
+        value |= (old_val == 0x7FFF) ? OF : 0;
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((result & 0x0F) == 0) ? AF : 0;
+    }
+
+    void update_flags_inc_U8(uint8_t old_val, uint8_t result) 
     {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
-        clear_compare_flags();
+        clear_eflags();
+        value |= saved_cf;
+        value |= (result == 0) ? ZF : 0;
+        value |= (result >> 7) ? SF : 0;  // Sign flag for 8-bit (bit 7)
+        // Overflow Flag (only if 0x7F -> 0x80)
+        value |= (old_val == 0x7F) ? OF : 0;
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+        value |= ((result & 0x0F) == 0) ? AF : 0;
+    }
+
+    void update_flags_dec_U32(uint32_t old_val, uint32_t result)
+    {
+        // Preserve Carry Flag
+        uint32_t saved_cf = value & CF;
+        clear_eflags();
         value |= saved_cf;
 
         // Zero Flag
@@ -412,13 +521,54 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0x0F) ? AF : 0;
     }
 
-    void update_flags_neg(uint32_t original_value, uint32_t result)
+    void update_flags_dec_U16(uint16_t old_val, uint16_t result) 
     {
-        clear_compare_flags();
-        // Correct CF behavior for NEG:
+        // Preserve Carry Flag
+        uint32_t saved_cf = value & CF;
+        clear_eflags();
+        value |= saved_cf;
+
+
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x8000) ? SF : 0;
+
+        value |= (old_val == 0x8000) ? OF : 0;
+
+        // Parity Flag (still based on lowest 8 bits)
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+
+        // Auxiliary Flag
+        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+    }
+
+    void update_flags_dec_U8(uint8_t old_val, uint8_t result) 
+    {
+        uint32_t saved_cf = value & CF;
+        clear_eflags();
+        value |= saved_cf;
+
+        value |= (result == 0) ? ZF : 0;
+
+        // Sign Flag - check the highest bit (bit 7 for 8-bit)
+        value |= (result & 0x80) ? SF : 0;
+
+        // Overflow Flag (only if 0x80 -> 0x7F)
+        value |= (old_val == 0x80) ? OF : 0;
+
+        // Parity Flag
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+
+        // Auxiliary Flag
+        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+    }
+
+    void update_flags_neg_U32(uint32_t original_value, uint32_t result)
+    {
+        clear_eflags();
+
         value |= (original_value != 0) ? X86EFlags::CF : 0;
 
-        // OF set if negating INT_MIN
         value |= (original_value == 0x80000000) ? X86EFlags::OF : 0;
 
         // Other flags
@@ -430,12 +580,45 @@ struct X86EFlags
         value |= ((original_value ^ result) & 0x10) ? X86EFlags::AF : 0;
     }
 
+    void update_flags_neg_U16(uint16_t original_value, uint16_t result) 
+    {
+        clear_eflags();
+
+        value |= (original_value != 0) ? CF : 0;
+
+        value |= (original_value == 0x8000) ? OF : 0;
+
+        // Other flags
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x8000) ? SF : 0;  // Sign flag for 16-bit
+
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((original_value ^ result) & 0x10) ? AF : 0;
+    }
+
+
+    void update_flags_neg_U8(uint8_t original_value, uint8_t result) 
+    {
+        clear_eflags();
+
+        value |= (original_value != 0) ? CF : 0;
+        value |= (original_value == 0x80) ? OF : 0;
+
+        // Other flags
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x80) ? SF : 0;  // Sign flag for 8-bit
+
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+        value |= ((original_value ^ result) & 0x10) ? AF : 0;
+    }
+
     // Updates flags after SHL (Shift Left)
     void update_flags_shl(uint32_t value_before, uint32_t shift_count, uint32_t result) {
-        clear_compare_flags();
+        clear_eflags();
 
         // CF = Last bit shifted out (MSB before shift)
-        if (shift_count > 0) {
+        if (shift_count > 0 && shift_count <= 32) {
             uint32_t last_shifted_out = (value_before >> (32 - shift_count)) & 1;
             value |= (last_shifted_out) ? CF : 0;
         }
@@ -448,7 +631,7 @@ struct X86EFlags
         }
 
         // SF = MSB of result
-        value |= (result >> 31) & SF;
+        value |= (result >> 31) ? SF : 0;
 
         // ZF = Result is zero
         value |= (result == 0) ? ZF : 0;
@@ -460,7 +643,7 @@ struct X86EFlags
 
     // Updates flags after SHR (Shift Right)
     void update_flags_shr(uint32_t value_before, uint32_t shift_count, uint32_t result) {
-        clear_compare_flags();
+        clear_eflags();
 
         // CF = Last bit shifted out (LSB before shift)
         if (shift_count > 0) {
@@ -468,15 +651,14 @@ struct X86EFlags
             value |= (last_shifted_out) ? CF : 0;
         }
 
-        // OF = Undefined for multi-bit shifts (but some CPUs leave it unchanged)
-        // For 1-bit shifts, OF = old MSB (Intel manual says undefined, but some CPUs set it)
+        // OF = MSB of original operand for 1-bit shifts
         if (shift_count == 1) {
             bool msb_before = (value_before >> 31) & 1;
             value |= msb_before ? OF : 0;
         }
 
         // SF = MSB of result
-        value |= (result >> 31) & SF;
+        value |= (result >> 31) ? SF : 0;
 
         // ZF = Result is zero
         value |= (result == 0) ? ZF : 0;
@@ -488,13 +670,13 @@ struct X86EFlags
 
     void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         // Only update flags if shift count is non-zero
         if (shift_count > 0)
         {
             // Get bit width of the operand
-            uint32_t bit_width = 32; // Assuming 32-bit operation by default
+            uint32_t bit_width = 32; 
 
             // CF = Last bit shifted out of the high-order bit
             uint32_t msb_position = bit_width - 1;
@@ -522,7 +704,7 @@ struct X86EFlags
 
     // Updates flags after SAR (Shift Arithmetic Right)
     void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result) {
-        clear_compare_flags();
+        clear_eflags();
 
         // CF = Last bit shifted out (LSB before shift)
         if (shift_count > 0) {
@@ -530,11 +712,11 @@ struct X86EFlags
             value |= (last_shifted_out) ? CF : 0;
         }
 
-        // OF = Cleared for SAR (Intel manual specifies this)
+
         value &= ~OF;
 
         // SF = MSB of result
-        value |= (result >> 31) & SF;
+        value |= (result >> 31) ? SF : 0;
 
         // ZF = Result is zero
         value |= (result == 0) ? ZF : 0;
@@ -547,7 +729,7 @@ struct X86EFlags
     // Updates flags after ROL (Rotate Left)
     void update_flags_rol(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         //CF = Last bit rotated out (MSB before rotation)
         if (shift_count > 0)
@@ -568,7 +750,7 @@ struct X86EFlags
     // Updates flags after ROR (Rotate Right)
     void update_flags_ror(uint32_t value_before, uint32_t shift_count, uint32_t result)
     {
-        clear_compare_flags();
+        clear_eflags();
 
         // CF = Last bit rotated out (LSB before rotation)
         if (shift_count > 0) {
@@ -957,6 +1139,21 @@ inline uint64_t X86_PACKUSWB(uint64_t dst_val, uint64_t src_val)
         int16_t word = (src_val >> (i * 16)) & 0xFFFF;
         uint8_t byte = (word < 0) ? 0 : ((word > 255) ? 255 : static_cast<uint8_t>(word));
         result |= static_cast<uint64_t>(byte) << ((i + 4) * 8);
+    }
+
+    return result;
+}
+
+inline uint64_t X86_PAVGB(uint64_t dst_val, uint64_t src_val)
+{
+    uint64_t result = 0;
+
+    for (size_t i = 0; i < 8; i++) 
+    {
+       uint8_t dst_byte = (dst_val >> (i * 8)) & 0xFF;
+       uint8_t src_byte = (src_val >> (i * 8)) & 0xFF;
+       uint8_t avg = (dst_byte + src_byte + 1) >> 1;
+       result |= (uint64_t(avg) << (i * 8));
     }
 
     return result;
