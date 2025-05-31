@@ -2570,7 +2570,7 @@ bool Recompiler::Recompile(
                     // Direct call (relative offset)
                     if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
                     {
-                        println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
+                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
                         uint32_t targetAddress = base + insn.insn.length + insn.operands[0].imm.value.s;
                         int res = printFunctionCallAddr(targetAddress);
 
@@ -2587,7 +2587,7 @@ bool Recompiler::Recompile(
                         const auto callDst = ResolveKernelCall(targetAddress);
                         if (callDst)
                         {
-                            println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer");
+                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                             int res = printFunctionCallAddr(targetAddress);
                             if (!res)
                                 println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
@@ -2596,7 +2596,7 @@ bool Recompiler::Recompile(
                         {
                             // Indirect call (memory operand)
                             println("\tauto ptr_{} = *(uint32_t*)(base + " + ea(insn.operands[0]) + ");", base);
-                            println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer");
+                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                             println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
                         }
                     }
@@ -2604,7 +2604,7 @@ bool Recompiler::Recompile(
                     {
                         // Register indirect (call eax)
                         println("\tauto ptr_{} = " + get_x86_reg(insn.operands[0].reg.value) + ";", base);
-                        println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer");
+                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                         println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
                     }
                 }
@@ -2751,6 +2751,7 @@ bool Recompiler::Recompile(
             case ZYDIS_MNEMONIC_EMMS:
                 println("\t_mm_empty();");
                 println("\tctx.fpu.tw = 0xFFFF;");
+        println("\tctx.fpu.top = 0;");
                 break;
             case ZYDIS_MNEMONIC_FILD:
                 if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -3551,9 +3552,9 @@ bool Recompiler::Recompile(
                 {
                     uint16_t stack_adjust = insn.operands[0].imm.value.u;
                     if (stack_adjust > 0)
-                        println("\tctx.esp.u32 += 0x{:X};  //Adjust stack pointer", stack_adjust);
+                println("\tctx.esp.u32 += 0x{:X};  //Adjust esp for return value (0xC2 0x{:x})", stack_adjust, stack_adjust);
                 }
-                println("\tctx.esp.u32 += 0x{:X};  //Adjust stack pointer", 4); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
+        println("\tctx.esp.u32 += 0x{:X};  //Adjust esp for return instruction", 4); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
                 println("\treturn;");
                 break;
             case ZYDIS_MNEMONIC_STD:
