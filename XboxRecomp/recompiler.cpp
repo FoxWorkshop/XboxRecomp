@@ -1377,11 +1377,6 @@ bool Recompiler::Recompile(
                     {
                         println("\tvalDouble0 = ctx.fpu.st0() {} X86_LOAD_F64({});", sign, ea(src));
                     }
-                    else
-                    {
-                        base = base;
-                        println("\t\tprintf(\"FPU_EXCEPTION INVALID MEMORY SIZE IN 3-OPERAND FLOATOPERATIONS\\n\");");
-                    }
 
                     println("\tctx.fpu.st0() = valDouble0;");
                 }
@@ -1412,16 +1407,6 @@ bool Recompiler::Recompile(
                             {
                                 println("\tvalDouble0 = ctx.fpu.st{}() {} X86_LOAD_F64({});", dst_idx, sign, ea(src));
                             }
-                            else
-                            {
-                                base = base;
-                                println("\t\tprintf(\"FPU_EXCEPTION INVALID MEMORY SIZE IN FLOATOPERATIONS\\n\");");
-                            }
-                        }
-                        else
-                        {
-                            base = base;
-                            println("\t\tprintf(\"FPU_EXCEPTION INVALID SRC IN FLOATOPERATIONS\\n\");");
                         }
                         // Write result back to dst
                         println("\tctx.fpu.st{}() = valDouble0;", dst_idx);
@@ -1447,25 +1432,9 @@ bool Recompiler::Recompile(
                             {
                                 println("\tvalDouble0 = ctx.fpu.st0() {} X86_LOAD_F64({});", sign, ea(src));
                             }
-                            else
-                            {
-                                base = base;
-                                println("\t\tprintf(\"FPU_EXCEPTION INVALID MEMORY SIZE IN IMPLICIT ST0 FLOATOPERATIONS\\n\");");
-                            }
-                        }
-                        else
-                        {
-                            base = base;
-                            println("\t\tprintf(\"FPU_EXCEPTION INVALID SRC IN IMPLICIT ST0 FLOATOPERATIONS\\n\");");
                         }
                         // Write result back to ST(0)
                         println("\tctx.fpu.st0() = valDouble0;");
-                    }
-                    else
-                    {
-                        base = base;
-                        println("\t\tprintf(\"FPU_EXCEPTION INVALID DST IN FLOATOPERATIONS\\n\");");
-
                     }
                 }
             }
@@ -2552,7 +2521,7 @@ bool Recompiler::Recompile(
             }
             else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY) {
                 // Memory comparison - use address-based unique temp name
-                println("\talignas(16) float comiss_temp_{:X} = X86_LOAD_F32({});",
+                println("\tfloat comiss_temp_{:X} = X86_LOAD_F32({});",
                     base, ea(insn.operands[1]));
                 println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), comiss_temp_{:X});",
                     xmm1, base);
@@ -2782,12 +2751,14 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FADDP:
         if (insn.insn.operand_count == 0)
         {
-            // Implicit ST(1) = ST(0) + ST(1), then pop
+            // Implicit FADDP ST(1), ST(0)
             println("\tctx.fpu.st1() += ctx.fpu.st0();");
-            println("\tctx.fpu.pop();");
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            println("\tctx.fpu.pop();");
+
         }
-        else if (insn.insn.operand_count >= 2) {
+        else if (insn.insn.operand_count >= 2)
+        {
             const auto& dest = insn.operands[0];
             const auto& src = insn.operands[1];
 
@@ -2795,9 +2766,7 @@ bool Recompiler::Recompile(
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
 
-                println("\tctx.fpu.st{}() += ctx.fpu.st{}();",
-                    dest.reg.value - ZYDIS_REGISTER_ST0,
-                    src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.st{}() += ctx.fpu.st{}();", dest.reg.value - ZYDIS_REGISTER_ST0, src.reg.value - ZYDIS_REGISTER_ST0);
                 println("\tctx.fpu.pop();");
                 println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
             }
@@ -2923,8 +2892,27 @@ bool Recompiler::Recompile(
         floatOperations("-", insn.operands[0].size);
         break;
     case ZYDIS_MNEMONIC_FSUBP:
-        println("\tctx.fpu.st1() -= ctx.fpu.st0();");
-        println("\tctx.fpu.pop();");
+        if (insn.insn.operand_count == 0)
+        {
+            println("\tctx.fpu.st1() -= ctx.fpu.st0();");
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            println("\tctx.fpu.pop();");
+
+        }
+        else if (insn.insn.operand_count >= 2)
+        {
+            const auto& dest = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+
+                println("\tctx.fpu.st{}() -= ctx.fpu.st{}();", dest.reg.value - ZYDIS_REGISTER_ST0, src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.pop();");
+                println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            }
+        }
         break;
     case ZYDIS_MNEMONIC_FSUBR:
         println("\tctx.fpu.clear_flags();");
@@ -3041,8 +3029,27 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FMULP:
-        println("\tctx.fpu.st1() *= ctx.fpu.st0();");
-        println("\tctx.fpu.pop();");
+        if (insn.insn.operand_count == 0)
+        {
+            println("\tctx.fpu.st1() *= ctx.fpu.st0();");
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            println("\tctx.fpu.pop();");
+
+        }
+        else if (insn.insn.operand_count >= 2)
+        {
+            const auto& dest = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+
+                println("\tctx.fpu.st{}() *= ctx.fpu.st{}();", dest.reg.value - ZYDIS_REGISTER_ST0, src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.pop();");
+                println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            }
+        }
         break;
     case ZYDIS_MNEMONIC_FSTP:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
@@ -3135,38 +3142,47 @@ bool Recompiler::Recompile(
         floatOperations("/", insn.operands[0].size);
         break;
     case ZYDIS_MNEMONIC_FDIVP:
-        if (insn.insn.operand_count == 2)
-        {
-            const auto& dst = insn.operands[0];
-            const auto& src = insn.operands[1];
+    {
+        const ZydisDecodedOperand* dst = nullptr;
+        const ZydisDecodedOperand* src = nullptr;
 
-            // Both operands must be FPU stack registers
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                dst.reg.value >= ZYDIS_REGISTER_ST0 && dst.reg.value <= ZYDIS_REGISTER_ST7 &&
-                src.type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                src.reg.value >= ZYDIS_REGISTER_ST0 && src.reg.value <= ZYDIS_REGISTER_ST7)
+        if (insn.insn.operand_count >= 2)
+        {
+            // Find explicit or implicit ST(i), ST(0)
+            for (size_t i = 0; i < insn.insn.operand_count; ++i)
             {
-                // Check for division by zero and handle exception
-                println("\tif (ctx.fpu.st0() == 0.0L) {{");
-                println("\t\tctx.fpu.flag_divzero();");
-                println("\t\tctx.fpu.pop();");
-                println("\t}} else {{");
-                println("\t\tctx.fpu.st1() = ctx.fpu.st1() / ctx.fpu.st0();");
-                println("\t\tctx.fpu.pop();");
-                println("\t}}");
+                if (insn.operands[i].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                    insn.operands[i].reg.value >= ZYDIS_REGISTER_ST0 &&
+                    insn.operands[i].reg.value <= ZYDIS_REGISTER_ST7)
+                {
+                    if (!dst)
+                        dst = &insn.operands[i];
+                    else
+                        src = &insn.operands[i];
+                }
             }
         }
-        else if (insn.insn.operand_count == 0 || insn.insn.operand_count == 1)
+
+        // If operands not found (0 or 1), assume FDIVP ST1, ST0
+        uint8_t dst_idx = 1;
+        uint8_t src_idx = 0;
+
+        if (dst && src)
         {
-            println("\tif (ctx.fpu.st0() == 0.0L) {{");
-            println("\t\tctx.fpu.flag_divzero();");
-            println("\t\tctx.fpu.pop();");
-            println("\t}} else {{");
-            println("\t\tctx.fpu.st1() = ctx.fpu.st1() / ctx.fpu.st0();");
-            println("\t\tctx.fpu.pop();");
-            println("\t}}");
+            dst_idx = dst->reg.value - ZYDIS_REGISTER_ST0;
+            src_idx = src->reg.value - ZYDIS_REGISTER_ST0;
         }
-        break;
+
+        println("\tif (ctx.fpu.st{}() == 0.0L) {{", src_idx);
+        println("\t\tctx.fpu.flag_divzero();");
+        println("\t\tctx.fpu.pop();");
+        println("\t}} else {{");
+        println("\t\tctx.fpu.st{}() = ctx.fpu.st{}() / ctx.fpu.st{}();", dst_idx, dst_idx, src_idx);
+        println("\t\tctx.fpu.pop();");
+        println("\t}}");
+
+    }
+    break;
     case ZYDIS_MNEMONIC_FIDIV:
         println("\tctx.fpu.clear_flags();");
         if (insn.insn.operand_count >= 1)
@@ -3207,15 +3223,36 @@ bool Recompiler::Recompile(
             }
 
         }
-        else
-        {
-            // No operands - invalid instruction
-            println("\tctx.fpu.signal_exception(FPU_EXCEPTION_INVALID);");
-        }
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FDIVR:
-        if (insn.insn.operand_count == 2)
+        if (insn.insn.operand_count == 3)
+        { 
+            if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[0].reg.value >= ZYDIS_REGISTER_ST0 &&
+                insn.operands[0].reg.value <= ZYDIS_REGISTER_ST7 &&
+                insn.operands[1].reg.value >= ZYDIS_REGISTER_ST0 &&
+                insn.operands[1].reg.value <= ZYDIS_REGISTER_ST7)
+            {
+                int st_dest = insn.operands[0].reg.value - ZYDIS_REGISTER_ST0;
+                int st_src = insn.operands[1].reg.value - ZYDIS_REGISTER_ST0;
+                println("\tctx.fpu.st{}() = ctx.fpu.st{}() / ctx.fpu.st{}();", st_dest, st_src, st_dest);
+            }
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (insn.operands[0].size == 32) {
+                    println("\tctx.fpu.st0() = X86_LOAD_F32({}) / ctx.fpu.st0();", ea(insn.operands[0]));
+                }
+                else if (insn.operands[0].size == 64) {
+                    println("\tctx.fpu.st0() = X86_LOAD_F64({}) / ctx.fpu.st0();", ea(insn.operands[0]));
+                }
+                else {
+                    println("// ERROR: Unsupported FDIVR memory operand size");
+                }
+            }
+        }
+        else if (insn.insn.operand_count == 2)
         {
             // Case 1: FDIVR ST(1), ST(0) → ST(1) = ST(0) / ST(1)
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -5710,6 +5747,7 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_UCOMISS:
     {
         const auto& op2 = insn.operands[1];
+        const std::string xmm1 = get_x86_reg(insn.operands[0].reg.value, true);
         std::string src;
 
         if (op2.type == ZYDIS_OPERAND_TYPE_REGISTER)
@@ -5724,6 +5762,8 @@ bool Recompiler::Recompile(
         {
             src = fmt::format("(float)X86_LOAD_F32({})", ea(op2));
         }
+
+        println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), {});", xmm1, src);
     }
     break;
     case ZYDIS_MNEMONIC_LAHF:
