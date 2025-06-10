@@ -239,20 +239,19 @@ struct X86EFlags
         clear_eflags();
         const bool unordered = std::isnan(lhs) || std::isnan(rhs);
 
-        // ZF: equal (including unordered)
-        if (lhs == rhs || unordered)
-            value |= ZF;
+        if (unordered) {
+            // Unordered: set PF, CF, ZF
+            value |= (PF | CF | ZF);
+        }
+        else 
+        {
 
-        // CF: set when lhs < rhs (for jb instruction)
-        if (lhs < rhs)
-            value |= CF;
+            if (lhs == rhs)
+                value |= ZF;      
+            else if (lhs < rhs)
+                value |= CF;  
+        }
 
-        // PF: unordered (either is NaN)
-        if (unordered)
-            value |= PF;
-
-        // SF: typically not used in FP comparisons
-        // OF: typically cleared in FP comparisons
         value &= ~OF;
     }
 
