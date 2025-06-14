@@ -5342,71 +5342,218 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
+            uint32_t operand_size = dst.size;
 
             std::string temp = "temp_" + std::to_string(base);
             std::string result = "result_" + std::to_string(base);
+            std::string shift_count_var = "shift_count_" + std::to_string(base);
 
             // SHLD reg/mem, reg, imm
             if (insn.operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
             {
                 uint32_t shift_count = insn.operands[2].imm.value.u;
 
+                // Mask shift count to operand size
+                uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+                shift_count = shift_count & (mask_bits - 1);
+
                 if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
                 {
+                    println("\tuint32_t {} = {};", shift_count_var, shift_count);
                     println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
 
-                    println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
-                        result, get_x86_reg(dst.reg.value), shift_count,
-                        get_x86_reg(src.reg.value),
-                        shift_count);
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} << {}) | ({} >> (16 - {}))) & 0xFFFF;",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
 
                     println("\t{} = {};", get_x86_reg(dst.reg.value), result);
-                    println("\tctx.eflags.update_flags_shl({}, {}, {});", temp, shift_count, get_x86_reg(dst.reg.value));
+                    println("\tctx.eflags.update_flags_shld({}, {}, {}, {});",
+                        temp, shift_count_var, get_x86_reg(dst.reg.value), operand_size);
                 }
                 else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
-
+                    println("\tuint32_t {} = {};", shift_count_var, shift_count);
                     println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-                    println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
-                        result, temp, shift_count,
-                        get_x86_reg(src.reg.value),
-                        shift_count);
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} << {}) | ({} >> (16 - {}))) & 0xFFFF;",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
 
                     println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), result);
-                    println("\tctx.eflags.update_flags_shl({}, {}, X86_LOAD_{}({}));",
-                        temp, shift_count, size_suffix, ea(dst));
+                    println("\tctx.eflags.update_flags_shld({}, {}, X86_LOAD_{}({}), {});",
+                        temp, shift_count_var, size_suffix, ea(dst), operand_size);
                 }
             }
             // SHLD reg/mem, reg, CL
             else if (insn.operands[2].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 insn.operands[2].reg.value == ZYDIS_REGISTER_CL)
             {
+                uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+
                 if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
                 {
-
+                    println("\tuint32_t {} = ctx.ecx.u8_lo & {};", shift_count_var, mask_bits - 1);
                     println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-                    println("\tauto {} = ({} << ctx.ecx.u8_lo) | ({} >> (32 - ctx.ecx.u8_lo));",
-                        result,
-                        get_x86_reg(dst.reg.value),
-                        get_x86_reg(src.reg.value));
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} << {}) | ({} >> (16 - {}))) & 0xFFFF;",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
 
                     println("\t{} = {};", get_x86_reg(dst.reg.value), result);
-                    println("\tctx.eflags.update_flags_shl({}, ctx.ecx.u8_lo, {});",
-                        temp, get_x86_reg(dst.reg.value));
+                    println("\tctx.eflags.update_flags_shld({}, {}, {}, {});",
+                        temp, shift_count_var, get_x86_reg(dst.reg.value), operand_size);
                 }
                 else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
+                    println("\tuint32_t {} = ctx.ecx.u8_lo & {};", shift_count_var, mask_bits - 1);
                     println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
 
-                    // Perform the SHLD operation
-                    println("\tauto {} = ({} << ctx.ecx.u8_lo) | ({} >> (32 - ctx.ecx.u8_lo));",
-                        result,
-                        temp,
-                        get_x86_reg(src.reg.value));
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} << {}) | ({} >> (16 - {}))) & 0xFFFF;",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} << {}) | ({} >> (32 - {}));",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
 
                     println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), result);
-                    println("\tctx.eflags.update_flags_shl({}, ctx.ecx.u8_lo, X86_LOAD_{}({}));",
-                        temp, size_suffix, ea(dst));
+                    println("\tctx.eflags.update_flags_shld({}, {}, X86_LOAD_{}({}), {});",
+                        temp, shift_count_var, size_suffix, ea(dst), operand_size);
+                }
+            }
+        }
+        break;
+    case ZYDIS_MNEMONIC_SHRD:
+        if (insn.insn.operand_count >= 3)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const char* size_suffix = GetOperandSizeName(dst.size);
+            uint32_t operand_size = dst.size; 
+
+            std::string temp = "temp_" + std::to_string(base);
+            std::string result = "result_" + std::to_string(base);
+            std::string shift_count_var = "shift_count_" + std::to_string(base);
+
+            // SHRD reg/mem, reg, imm
+            if (insn.operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+            {
+                uint32_t shift_count = insn.operands[2].imm.value.u;
+
+                // Mask shift count to operand size
+                uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+                shift_count = shift_count & (mask_bits - 1);
+
+                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                {
+                    println("\tuint32_t {} = {};", shift_count_var, shift_count);
+                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} >> {}) | ({} << (16 - {}))) & 0xFFFF;",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} >> {}) | ({} << (32 - {}));",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+
+                    println("\t{} = {};", get_x86_reg(dst.reg.value), result);
+                    println("\tctx.eflags.update_flags_shrd({}, {}, {}, {});",
+                        temp, shift_count_var, get_x86_reg(dst.reg.value), operand_size);
+                }
+                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                {
+                    println("\tuint32_t {} = {};", shift_count_var, shift_count);
+                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} >> {}) | ({} << (16 - {}))) & 0xFFFF;",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} >> {}) | ({} << (32 - {}));",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+
+                    println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), result);
+                    println("\tctx.eflags.update_flags_shrd({}, {}, X86_LOAD_{}({}), {});",
+                        temp, shift_count_var, size_suffix, ea(dst), operand_size);
+                }
+            }
+            // SHRD reg/mem, reg, CL
+            else if (insn.operands[2].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                insn.operands[2].reg.value == ZYDIS_REGISTER_CL)
+            {
+                uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+
+                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                {
+                    println("\tuint32_t {} = ctx.ecx.u8_lo & {};", shift_count_var, mask_bits - 1);
+                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} >> {}) | ({} << (16 - {}))) & 0xFFFF;",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} >> {}) | ({} << (32 - {}));",
+                            result, get_x86_reg(dst.reg.value), shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+
+                    println("\t{} = {};", get_x86_reg(dst.reg.value), result);
+                    println("\tctx.eflags.update_flags_shrd({}, {}, {}, {});",
+                        temp, shift_count_var, get_x86_reg(dst.reg.value), operand_size);
+                }
+                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                {
+                    println("\tuint32_t {} = ctx.ecx.u8_lo & {};", shift_count_var, mask_bits - 1);
+                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
+
+                    if (operand_size == 16) {
+                        println("\tauto {} = (({} >> {}) | ({} << (16 - {}))) & 0xFFFF;",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+                    else {
+                        println("\tauto {} = ({} >> {}) | ({} << (32 - {}));",
+                            result, temp, shift_count_var,
+                            get_x86_reg(src.reg.value), shift_count_var);
+                    }
+
+                    println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), result);
+                    println("\tctx.eflags.update_flags_shrd({}, {}, X86_LOAD_{}({}), {});",
+                        temp, shift_count_var, size_suffix, ea(dst), operand_size);
                 }
             }
         }

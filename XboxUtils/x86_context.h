@@ -670,38 +670,78 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
-    void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result)
-    {
+    void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
         clear_eflags();
 
-        // Only update flags if shift count is non-zero
-        if (shift_count > 0)
-        {
-            // Get bit width of the operand
-            uint32_t bit_width = 32; 
+        if (shift_count == 0) return; // No flags affected if shift count is 0
 
-            // CF = Last bit shifted out of the high-order bit
-            uint32_t msb_position = bit_width - 1;
-            uint32_t last_bit_shifted_out = (value_before >> (msb_position - (shift_count - 1))) & 1;
-            value |= last_bit_shifted_out ? CF : 0;
+        // Normalize shift count based on operand size
+        uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+        shift_count = shift_count & (mask_bits - 1);
 
-            // OF = For a 1-bit shift, OF is set if the MSB changed
-            if (shift_count == 1) {
-                bool msb_before = (value_before >> msb_position) & 1;
-                bool msb_after = (result >> msb_position) & 1;
-                value |= (msb_before != msb_after) ? OF : 0;
-            }
+        if (shift_count == 0) return;
 
-            // SF = MSB of result
-            value |= (result >> msb_position) & SF;
-
-            // ZF = Result is zero
-            value |= (result == 0) ? ZF : 0;
-
-            // PF = Parity of LSB
-            uint8_t lsb = result & 0xFF;
-            value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        // CF = Last bit shifted out
+        if (shift_count <= mask_bits) {
+            uint32_t last_shifted_out = (value_before >> (mask_bits - shift_count)) & 1;
+            value |= last_shifted_out ? CF : 0;
         }
+
+        // OF = Set if sign bit changed (only for 1-bit shifts)
+        if (shift_count == 1) {
+            uint32_t sign_bit = mask_bits - 1;
+            bool sign_before = (value_before >> sign_bit) & 1;
+            bool sign_after = (result >> sign_bit) & 1;
+            value |= (sign_before != sign_after) ? OF : 0;
+        }
+
+        // SF = MSB of result
+        value |= (result >> (mask_bits - 1)) ? SF : 0;
+
+        // ZF = Result is zero
+        uint32_t mask = (operand_size == 16) ? 0xFFFF : 0xFFFFFFFF;
+        value |= ((result & mask) == 0) ? ZF : 0;
+
+        // PF = Parity of LSB
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+    }
+
+    // Updates flags after SHRD (Shift Right Double)
+    void update_flags_shrd(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
+        clear_eflags();
+
+        if (shift_count == 0) return; // No flags affected if shift count is 0
+
+        // Normalize shift count based on operand size
+        uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
+        shift_count = shift_count & (mask_bits - 1);
+
+        if (shift_count == 0) return;
+
+        // CF = Last bit shifted out
+        if (shift_count <= mask_bits) {
+            uint32_t last_shifted_out = (value_before >> (shift_count - 1)) & 1;
+            value |= last_shifted_out ? CF : 0;
+        }
+
+        // OF = MSB of original operand (only for 1-bit shifts)
+        if (shift_count == 1) {
+            uint32_t sign_bit = mask_bits - 1;
+            bool msb_before = (value_before >> sign_bit) & 1;
+            value |= msb_before ? OF : 0;
+        }
+
+        // SF = MSB of result
+        value |= (result >> (mask_bits - 1)) ? SF : 0;
+
+        // ZF = Result is zero
+        uint32_t mask = (operand_size == 16) ? 0xFFFF : 0xFFFFFFFF;
+        value |= ((result & mask) == 0) ? ZF : 0;
+
+        // PF = Parity of LSB
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
     // Updates flags after SAR (Shift Arithmetic Right)
