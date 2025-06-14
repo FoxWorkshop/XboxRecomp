@@ -1832,6 +1832,18 @@ bool Recompiler::Recompile(
             const char* size_suffix = GetOperandSizeName(dst.size);
             uint32_t size = dst.size;
 
+            //hacky way to fix indirect call using kernel address through register
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER && src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                uint32_t offset = (uint32_t)src.mem.disp.value;
+                auto kernelAddr = ResolveKernelCall(offset);
+                if (kernelAddr)
+                {
+                    funcConfig.isRegKernelAddr = true; 
+                    funcConfig.RegisterKernelAddr = (uint32_t)offset;
+                }
+            }
+
             //FS is Xbox kernel stuff
             //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
@@ -1940,8 +1952,6 @@ bool Recompiler::Recompile(
                 }
             }
         }
-
-
         break;
     case ZYDIS_MNEMONIC_MOVQ:
         if (insn.insn.operand_count >= 2)
@@ -2621,8 +2631,16 @@ bool Recompiler::Recompile(
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                // Register indirect (call eax)
                 println("\tauto ptr_{} = " + get_x86_reg(insn.operands[0].reg.value) + ";", base);
+
+                // Register indirect (call eax)
+                if (funcConfig.isRegKernelAddr)
+                {
+                    println("\tif (ptr_{} >=  0x80000001 && ptr_{} <= 0x80000360) {{", base, base);
+                    println("\t\tptr_{} = 0x{:X};", base, funcConfig.RegisterKernelAddr);
+                    println("\t}}");
+                }
+         
                 println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                 println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
             }
@@ -5393,7 +5411,6 @@ bool Recompiler::Recompile(
             }
         }
         break;
-
     case ZYDIS_MNEMONIC_NEG:
         if (insn.insn.operand_count >= 1)
         {
@@ -5920,6 +5937,10 @@ bool Recompiler::Recompile(
         return false;
     }
 
+    if (funcConfig.isLastInst)
+    {
+        funcConfig.isRegKernelAddr = false;
+    }
 
     if (funcConfig.isLastInst && insn.insn.mnemonic != ZYDIS_MNEMONIC_JMP && insn.insn.mnemonic != ZYDIS_MNEMONIC_RET && insn.insn.mnemonic != ZYDIS_MNEMONIC_INT3)
     {

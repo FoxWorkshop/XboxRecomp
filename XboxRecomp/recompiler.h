@@ -80,6 +80,8 @@ struct RecompilerFuncConfig
     bool isFS{};
     bool isLastInst{};
     std::string RegisterStackBaseAddr;
+    bool isRegKernelAddr{};
+    uint32_t RegisterKernelAddr;
 };
 
 enum class CSRState {
