@@ -10,6 +10,8 @@
 #include <xbe.h>
 #include <util.h>
 
+#define MMIO_BASE  0xFE800000
+#define MMIO_SIZE  0x00800000 
 
 //will get identified when parsing XBE file.
 size_t textBaseAddr = 0x11000;
@@ -1002,6 +1004,36 @@ std::string format_fp_operand(const ZydisDecodedOperand& op, bool isDouble)
     return ss.str();
 }
 
+inline bool is_mmio_address(uint32_t addr) {
+    return addr >= MMIO_BASE && addr < (MMIO_BASE + MMIO_SIZE);
+}
+
+
+inline std::string GetMMIOArray(uint32_t addr, const int size)
+{
+    if (!is_mmio_address(addr))
+        return "";
+
+    uint32_t offset = addr - MMIO_BASE;
+    std::string offsetString = std::to_string(offset);
+    std::string string = "/* error offset g_mmio*/;";
+
+
+    switch (size)
+    {
+    case 8:
+        string = "g_mmio[" + offsetString + "]";
+        break;
+    case 16:
+        string = "*(uint16_t*)&" + (std::string)"g_mmio[" + offsetString + "]";
+        break;
+    case 32:
+        string = "*(uint32_t*)&" + (std::string)"g_mmio[" + offsetString + "]";
+    }
+
+    return string;
+}
+
 
 bool Recompiler::Recompile(
     const Function& fn,
@@ -1306,50 +1338,43 @@ bool Recompiler::Recompile(
 
 
 
-    auto printConditionalBranch = [&](bool not_, const std::string_view& cond, uint32_t base, const x86_insn& insn) {
-        uint32_t targetAddress = base + insn.insn.length;
-
-
-        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+    auto printConditionalBranch = [&](bool not_, const std::string_view& cond, uint32_t base, const x86_insn& insn)
         {
-            targetAddress += insn.operands[0].imm.value.s;  // Signed displacement
-        }
-        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
-            insn.operands[0].mem.disp.value) {
-            targetAddress += insn.operands[0].mem.disp.value;
-        }
+            uint32_t targetAddress = base + insn.insn.length;
 
 
-        std::string targetStr = fmt::format("0x{:X}", targetAddress);
-
-        if (targetAddress == 0)
-        {
-            println("\tprintf(\"WARNING: Branch target resolves to 0x0 (possible analysis error) - {:X}\n\");", base);
-            println("\t// WARNING: Branch target resolves to 0x0 (possible analysis error)");
-            println("\tif ({}{}) goto invalid_target;", not_ ? "!" : "", cond);
-        }
-        else if (targetAddress < fn.base || targetAddress >= fn.base + fn.size)
-        {
-            // External function call
-            println("\tif ({}{}) {{", not_ ? "!" : "", cond);
-            printFunctionCallAddr(targetAddress);
-            println("\treturn;");
-            println("\t}}");
-        }
-        else
-        {
-            if (targetAddress == fn.base)
+            if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
             {
+                targetAddress += insn.operands[0].imm.value.s;  // Signed displacement
+            }
+            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                insn.operands[0].mem.disp.value) {
+                targetAddress += insn.operands[0].mem.disp.value;
+            }
+
+
+            std::string targetStr = fmt::format("0x{:X}", targetAddress);
+
+            if (targetAddress == 0)
+            {
+                println("\tprintf(\"WARNING: Branch target resolves to 0x0 (possible analysis error) - {:X}\n\");", base);
+                println("\t// WARNING: Branch target resolves to 0x0 (possible analysis error)");
+                println("\tif ({}{}) goto invalid_target;", not_ ? "!" : "", cond);
+            }
+            else if (targetAddress < fn.base || targetAddress >= fn.base + fn.size || targetAddress == fn.base)
+            {
+                // External function call
+                println("\tif ({}{}) {{", not_ ? "!" : "", cond);
                 printFunctionCallAddr(targetAddress);
                 println("\treturn;");
+                println("\t}}");
             }
             else
             {
                 // Internal jump
-                println("\tif ({}{}) goto loc_{:X};",
-                    not_ ? "!" : "", cond, targetAddress);
+                println("\tif ({}{}) goto loc_{:X};", not_ ? "!" : "", cond, targetAddress);
+
             }
-        }
         };
 
     auto floatOperations = [&](std::string sign, ZyanU16 opSize)
@@ -1804,6 +1829,7 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* srcSizeSuffix = GetOperandSizeName(src.size);
+            const char* size_suffix = GetOperandSizeName(dst.size);
             uint32_t size = dst.size;
 
             //FS is Xbox kernel stuff
@@ -1822,10 +1848,10 @@ bool Recompiler::Recompile(
                 // Special case: FS:[0x24] is 8-bit IRQL
                 else if (offset == 0x24)
                 {
-                    println("\t{} = X86_LOAD_U8(ctx.kpcr_ptr + 0x24);  //Read IRQL",
-                        get_x86_reg(dst.reg.value));
-                    if (size > 8) println("\t{} = (uint8_t)({});  //Truncate to 8-bit",
-                        get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
+                    println("\t{} = X86_LOAD_U8(ctx.kpcr_ptr + 0x24);  //Read IRQL", get_x86_reg(dst.reg.value));
+                    if (size > 8)
+                        println("\t{} = (uint8_t)({});  //Truncate to 8-bit", get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
+
                 }
                 // Default: Host pointer read
                 else
@@ -1857,7 +1883,29 @@ bool Recompiler::Recompile(
                 break;
             }
 
-            const char* size_suffix = GetOperandSizeName(dst.size);
+
+            //DS can be hardware Xbox 
+           //In that case, we identify MMIO access and redirect the addresses to a global array. 
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_DS) //read
+            {
+                uint32_t offset = (uint32_t)src.mem.disp.value;
+                if (is_mmio_address(offset))
+                {
+                    println("\t{} = {};  //Read DS Hardware variable", get_x86_reg(dst.reg.value), GetMMIOArray(offset, src.size));
+                    break;
+                }
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_DS) //write
+            {
+                uint32_t offset = (uint32_t)dst.mem.disp.value;
+                if (is_mmio_address(offset))
+                {
+                    println("\t{} = {};  //Write in DS Hardware memory", GetMMIOArray(offset, dst.size), get_x86_reg(src.reg.value));
+                    break;
+                }
+            }
+
+
             std::string src_str = format_operand(src, size_suffix);
             std::string dst_str = get_x86_reg(dst.reg.value); // Always a register for MOV
 
@@ -1892,6 +1940,8 @@ bool Recompiler::Recompile(
                 }
             }
         }
+
+
         break;
     case ZYDIS_MNEMONIC_MOVQ:
         if (insn.insn.operand_count >= 2)
@@ -3227,7 +3277,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FDIVR:
         if (insn.insn.operand_count == 3)
-        { 
+        {
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 insn.operands[0].reg.value >= ZYDIS_REGISTER_ST0 &&
@@ -4314,9 +4364,47 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_TEST:
         if (insn.insn.operand_count >= 2)
         {
-            const char* size_suffix = GetOperandSizeName(insn.operands[0].size);
-            std::string lhs = format_operand(insn.operands[0], size_suffix);
-            std::string rhs = format_operand(insn.operands[1], size_suffix);
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const char* size_suffix = GetOperandSizeName(dst.size);
+            std::string lhs, rhs;
+
+            // Check destination operand for MMIO
+            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_DS)
+            {
+                uint32_t offset = (uint32_t)dst.mem.disp.value;
+                if (is_mmio_address(offset))
+                {
+                    lhs = GetMMIOArray(offset, dst.size);
+                }
+                else
+                {
+                    lhs = format_operand(dst, size_suffix);
+                }
+            }
+            else
+            {
+                lhs = format_operand(dst, size_suffix);
+            }
+
+            // Check source operand for MMIO
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_DS)
+            {
+                uint32_t offset = (uint32_t)src.mem.disp.value;
+                if (is_mmio_address(offset))
+                {
+                    rhs = GetMMIOArray(offset, src.size);
+                }
+                else
+                {
+                    rhs = format_operand(src, size_suffix);
+                }
+            }
+            else
+            {
+                rhs = format_operand(src, size_suffix);
+            }
+
             if (!lhs.empty() && !rhs.empty())
             {
                 println("\tctx.eflags.update_test_flags({} & {});", lhs, rhs);

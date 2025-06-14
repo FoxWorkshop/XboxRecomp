@@ -110,6 +110,9 @@
 #endif
 
 
+
+extern uint8_t g_mmio[];
+
 typedef void X86Func(struct X86Context& __restrict__ ctx, uint8_t* base);
 
 struct X86FuncMapping
