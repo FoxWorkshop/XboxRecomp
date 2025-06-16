@@ -2956,6 +2956,21 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         }
         break;
+    case ZYDIS_MNEMONIC_FSCALE:
+        // FSCALE - Scale ST(0) by power of 2 from ST(1)
+        println("\tctx.fpu.clear_flags();");
+        println("\tvalDouble0 = std::trunc(ctx.fpu.st1());");
+        println("\tif (valDouble0 >= -16446.0L && valDouble0 <= 16383.0L) {{");
+        println("\t\tctx.fpu.st0() = std::ldexp(ctx.fpu.st0(), static_cast<int>(valDouble0));");
+        println("\t}} else {{");
+        println("\t\t// Handle overflow/underflow");
+        println("\t\tif (valDouble0 > 0) {{");
+        println("\t\t\tctx.fpu.st0() = (ctx.fpu.st0() >= 0) ? std::numeric_limits<long double>::infinity() : -std::numeric_limits<long double>::infinity();");
+        println("\t\t}} else {{");
+        println("\t\t\tctx.fpu.st0() = std::copysign(0.0L, ctx.fpu.st0());");
+        println("\t\t}}");
+        println("\t}}");
+        break;
     case ZYDIS_MNEMONIC_FSUB:
         floatOperations("-", insn.operands[0].size);
         break;
@@ -3048,16 +3063,6 @@ bool Recompiler::Recompile(
                             throw std::runtime_error("Invalid memory size for FSUBR with two operands");
                         }
                     }
-                    else
-                    {
-                        count = count;
-                        throw std::runtime_error("FPU_EXCEPTION_INVALID: FSUBR with non-x87 memory or reg src");
-                    }
-                }
-                else
-                {
-                    count = count;
-                    throw std::runtime_error("FPU_EXCEPTION_INVALID: FSUBR dst must be x87 register");
                 }
             }
         }
@@ -3169,10 +3174,14 @@ bool Recompiler::Recompile(
                 insn.operands[0].reg.value - ZYDIS_REGISTER_ST0);
         }
         break;
+    case ZYDIS_MNEMONIC_FLD1:
+        // No operands, always pushes 1.0 onto ST(0)
+        println("\tctx.fpu.clear_flags();");
+        println("\tctx.fpu.push(1.0L);");
+        break;
     case ZYDIS_MNEMONIC_FLDZ: // Load +0.0
         println("\tctx.fpu.push(0.0L);");
         break;
-
     case ZYDIS_MNEMONIC_FNSTSW: // Store FPU Status Word
 
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -3460,7 +3469,7 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.st{}() = tmp_{:X};", st_index, base);
         }
         break;
-    case ZYDIS_MNEMONIC_FXAM:
+    case ZYDIS_MNEMONIC_FXAM: //todo clean this mess
     {
         println("\tctx.fpu.sw &= ~(X87FPU::C0 | X87FPU::C1 | X87FPU::C2 | X87FPU::C3);");
         println("\tvalDouble0 = ctx.fpu.st0();");
@@ -3535,6 +3544,20 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FWAIT:
         println("\tif (ctx.fpu.sw & 0x3F) {{");  // Check exception flags
         println("\t    ctx.fpu.handle_exceptions();");
+        println("\t}}");
+        break;
+    case ZYDIS_MNEMONIC_F2XM1:
+        //F2XM1 - Compute 2^ST(0) - 1
+        println("\tctx.fpu.clear_flags();");
+        println("\tvalDouble0 = ctx.fpu.st0();");
+        println("\tif (valDouble0 < -1.0L || valDouble0 > 1.0L) {{");
+        println("\t\tctx.fpu.sw |= ctx.fpu.C2;");
+        println("\t}}");
+        println("\tif (std::abs(valDouble0) < 1e-8L) {{");
+        println("\t\t//For small x, use Taylor series.");
+        println("\t\tctx.fpu.st0() = valDouble0 * 0.6931471805599453094172321214581766L;");
+        println("\t}} else {{");
+        println("\t\tctx.fpu.st0() = std::exp2(valDouble0) - 1.0L;");
         println("\t}}");
         break;
     case ZYDIS_MNEMONIC_JZ:
