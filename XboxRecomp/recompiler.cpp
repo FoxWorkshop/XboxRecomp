@@ -4864,6 +4864,40 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_SQRTSS:
+        //Computes square root of lowest 32-bit float in source, stores in dest[31:0]
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+            insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
+        {
+            // SQRTSS xmm1, xmm2 - register to register
+            auto dst_reg = insn.operands[0].reg.value - ZYDIS_REGISTER_XMM0;
+            auto src_reg = insn.operands[1].reg.value - ZYDIS_REGISTER_XMM0;
+            println("\tvalDouble0 = XMM_F32({}, 0);", src_reg);
+            println("\tif (valDouble0 < 0.0f && valDouble0 != -0.0f) {{");
+            println("\t\tXMM_F32({}, 0) = std::numeric_limits<float>::quiet_NaN();", dst_reg);
+            println("\t}} else {{");
+            println("\t\tXMM_F32({}, 0) = std::sqrt(valDouble0);", dst_reg);
+            println("\t}}");
+            println("\tXMM_U32({}, 1) = 0;", dst_reg);
+            println("\tXMM_U32({}, 2) = 0;", dst_reg);
+            println("\tXMM_U32({}, 3) = 0;", dst_reg);
+        }
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+            insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY)
+        {
+            // SQRTSS xmm1, [mem] - memory to register
+            auto dst_reg = insn.operands[0].reg.value - ZYDIS_REGISTER_XMM0;
+            println("\tvalDouble0 = X86_LOAD_F32({});", ea(insn.operands[1]));
+            println("\tif (valDouble0 < 0.0f && valDouble0 != -0.0f) {{");
+            println("\t\tXMM_F32({}, 0) = std::numeric_limits<float>::quiet_NaN();", dst_reg);
+            println("\t}} else {{");
+            println("\t\tXMM_F32({}, 0) = std::sqrt(valDouble0);", dst_reg);
+            println("\t}}");
+            println("\tXMM_U32({}, 1) = 0;", dst_reg);
+            println("\tXMM_U32({}, 2) = 0;", dst_reg);
+            println("\tXMM_U32({}, 3) = 0;", dst_reg);
+        }
+        break;
     case ZYDIS_MNEMONIC_PACKUSWB:
         if (insn.insn.operand_count == 2)
         {
