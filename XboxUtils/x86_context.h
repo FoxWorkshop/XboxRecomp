@@ -246,26 +246,46 @@ struct X86EFlags
             // Unordered: set PF, CF, ZF
             value |= (PF | CF | ZF);
         }
-        else 
+        else
         {
 
             if (lhs == rhs)
-                value |= ZF;      
+                value |= ZF;
             else if (lhs < rhs)
-                value |= CF;  
+                value |= CF;
         }
 
         value &= ~OF;
     }
 
-
-    void update_test_flags(uint32_t result)
+    void update_test_flags_U8(uint8_t result)
     {
         clear_eflags();
-
         if (result == 0)
             value |= ZF;
-        if (result & (1 << 31))
+        if (result & 0x80)  // Check bit 7 for 8-bit
+            value |= SF;
+        if (!(__builtin_popcount(result & 0xFF) & 1))
+            value |= PF;
+    }
+
+    void update_test_flags_U16(uint16_t result)
+    {
+        clear_eflags();
+        if (result == 0)
+            value |= ZF;
+        if (result & 0x8000)  //Check bit 15 for 16-bit
+            value |= SF;
+        if (!(__builtin_popcount(result & 0xFF) & 1))
+            value |= PF;
+    }
+
+    void update_test_flags_U32(uint32_t result)
+    {
+        clear_eflags();
+        if (result == 0)
+            value |= ZF;
+        if (result & 0x80000000)  // Check bit 31 for 32-bit
             value |= SF;
         if (!(__builtin_popcount(result & 0xFF) & 1))
             value |= PF;
@@ -315,9 +335,9 @@ struct X86EFlags
         value |= (((lhs & 0xF) + (rhs & 0xF)) > 0xF) ? AF : 0;
     }
 
-    void update_flags_add_U16(uint16_t lhs, uint16_t rhs, uint16_t result) 
+    void update_flags_add_U16(uint16_t lhs, uint16_t rhs, uint16_t result)
     {
-        clear_eflags(); 
+        clear_eflags();
 
         uint32_t full_result = (uint32_t)lhs + (uint32_t)rhs;
         value |= (full_result > 0xFFFF) ? CF : 0;
@@ -341,7 +361,7 @@ struct X86EFlags
         value |= (((lhs & 0xF) + (rhs & 0xF)) > 0xF) ? AF : 0;
     }
 
-    void update_flags_add_U8(uint8_t lhs, uint8_t rhs, uint8_t result) 
+    void update_flags_add_U8(uint8_t lhs, uint8_t rhs, uint8_t result)
     {
         clear_eflags();
 
@@ -390,7 +410,7 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
     }
 
-    void update_flags_sub_U16(uint16_t lhs, uint16_t rhs, uint16_t result) 
+    void update_flags_sub_U16(uint16_t lhs, uint16_t rhs, uint16_t result)
     {
         clear_eflags();
 
@@ -418,12 +438,12 @@ struct X86EFlags
         value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
     }
 
-    void update_flags_sub_U8(uint8_t lhs, uint8_t rhs, uint8_t result) 
+    void update_flags_sub_U8(uint8_t lhs, uint8_t rhs, uint8_t result)
     {
         clear_eflags();
 
         // Special case: SUB X,0 is identical to TEST X,X (only affects SF/ZF/PF)
-        if (rhs == 0) 
+        if (rhs == 0)
         {
             value |= (result == 0) ? ZF : 0;
             value |= (result & 0x80) ? SF : 0;
@@ -453,7 +473,7 @@ struct X86EFlags
             value |= (CF | OF);
     }
 
-    void update_flags_inc_U32(uint32_t old_val, uint32_t result) 
+    void update_flags_inc_U32(uint32_t old_val, uint32_t result)
     {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
@@ -468,7 +488,7 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0) ? AF : 0;
     }
 
-    void update_flags_inc_U16(uint16_t old_val, uint16_t result) 
+    void update_flags_inc_U16(uint16_t old_val, uint16_t result)
     {
 
         uint32_t saved_cf = value & CF;
@@ -483,7 +503,7 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0) ? AF : 0;
     }
 
-    void update_flags_inc_U8(uint8_t old_val, uint8_t result) 
+    void update_flags_inc_U8(uint8_t old_val, uint8_t result)
     {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
@@ -523,7 +543,7 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0x0F) ? AF : 0;
     }
 
-    void update_flags_dec_U16(uint16_t old_val, uint16_t result) 
+    void update_flags_dec_U16(uint16_t old_val, uint16_t result)
     {
         // Preserve Carry Flag
         uint32_t saved_cf = value & CF;
@@ -544,7 +564,7 @@ struct X86EFlags
         value |= ((result & 0x0F) == 0x0F) ? AF : 0;
     }
 
-    void update_flags_dec_U8(uint8_t old_val, uint8_t result) 
+    void update_flags_dec_U8(uint8_t old_val, uint8_t result)
     {
         uint32_t saved_cf = value & CF;
         clear_eflags();
@@ -582,7 +602,7 @@ struct X86EFlags
         value |= ((original_value ^ result) & 0x10) ? X86EFlags::AF : 0;
     }
 
-    void update_flags_neg_U16(uint16_t original_value, uint16_t result) 
+    void update_flags_neg_U16(uint16_t original_value, uint16_t result)
     {
         clear_eflags();
 
@@ -600,7 +620,7 @@ struct X86EFlags
     }
 
 
-    void update_flags_neg_U8(uint8_t original_value, uint8_t result) 
+    void update_flags_neg_U8(uint8_t original_value, uint8_t result)
     {
         clear_eflags();
 
@@ -987,16 +1007,16 @@ struct X87FPU
         while (pops--) pop();
     }
 
-    void compare_and_set_eflags(long double lhs, long double rhs, X86EFlags& eflags) 
+    void compare_and_set_eflags(long double lhs, long double rhs, X86EFlags& eflags)
     {
-        if (std::isnan(lhs) || std::isnan(rhs)) 
+        if (std::isnan(lhs) || std::isnan(rhs))
         {
             eflags.value |= X86EFlags::ZF | X86EFlags::PF | X86EFlags::CF;
         }
         else if (lhs > rhs) {
             eflags.value &= ~(X86EFlags::ZF | X86EFlags::CF);
         }
-        else if (lhs < rhs) 
+        else if (lhs < rhs)
         {
             eflags.value |= X86EFlags::CF;
             eflags.value &= ~X86EFlags::ZF;
@@ -1190,12 +1210,12 @@ inline uint64_t X86_PAVGB(uint64_t dst_val, uint64_t src_val)
 {
     uint64_t result = 0;
 
-    for (size_t i = 0; i < 8; i++) 
+    for (size_t i = 0; i < 8; i++)
     {
-       uint8_t dst_byte = (dst_val >> (i * 8)) & 0xFF;
-       uint8_t src_byte = (src_val >> (i * 8)) & 0xFF;
-       uint8_t avg = (dst_byte + src_byte + 1) >> 1;
-       result |= (uint64_t(avg) << (i * 8));
+        uint8_t dst_byte = (dst_val >> (i * 8)) & 0xFF;
+        uint8_t src_byte = (src_val >> (i * 8)) & 0xFF;
+        uint8_t avg = (dst_byte + src_byte + 1) >> 1;
+        result |= (uint64_t(avg) << (i * 8));
     }
 
     return result;

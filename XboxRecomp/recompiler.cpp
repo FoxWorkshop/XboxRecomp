@@ -4448,7 +4448,7 @@ bool Recompiler::Recompile(
 
             if (!lhs.empty() && !rhs.empty())
             {
-                println("\tctx.eflags.update_test_flags({} & {});", lhs, rhs);
+                println("\tctx.eflags.update_test_flags_{}({} & {});", size_suffix, lhs, rhs);
             }
         }
         break;
