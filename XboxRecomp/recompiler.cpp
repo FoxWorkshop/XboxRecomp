@@ -6133,6 +6133,8 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_WBINVD:
+        break; //We can safely ignore this
     default:
 
         println("\t//MISSING INSTRUCTION HERE TODO ADD");
