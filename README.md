@@ -1,21 +1,18 @@
 # XboxRecomp
 
-XboxRecomp is a tool that converts Xbox executables (xbe file) into C++ code, which can then be recompiled for any platform. Currently, it only supports x86 platforms due to the use of x86 intrinsics.
+XboxRecomp is a tool that converts Xbox executables (xbe file) into C++ code, which can then be recompiled for any platform. Currently, it only supports [x86 platforms](https://en.wikipedia.org/wiki/X86), but support for [ARM](https://en.wikipedia.org/wiki/ARM_architecture_family) is planned.
 
 This project was built (and therefore inspired) from [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), most PPC logic was rewritten for x86. (Sometimes in a questionable way as assembly isn't my expertise.).
 
-WARNING: This project isn't a plug and play or a XBE to EXE converter, this tool ONLY converts the game code to C++, which is not going to function correctly without a runtime backing it.
-You will have to implement a proper backend, emulate Xbox Kernel at minimum as well as other manual tweaks to make the game working properly.
+> [!WARNING]
+> This project isn't plug and play / drag drop XBE to EXE converter, this tool ONLY converts the game code to C++, which is NOT going to function correctly without a runtime backing it.
+> You will have to implement a proper backend, emulate Xbox Kernel at minimum, as well as other manual tweaks to make the game working properly.
 
 ## Implementation Details
 
 ### Instructions
-
-Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it might be possible to bypass this and just call the functions directly from the original XBE file, I think it's still cleaner to rebuild the functions from scratch, it was also a nice learning experience, though obviously the output is not very human-readable. 
-
-Having a translation process can also help a future implementation of other CPU language, such as Arm for potential Switch version, which won't be possible if we just call functions from the XBE file.
-
-The instruction implementations operate on little-endian values, which is what the original Xbox use.
+> [!NOTE]
+> Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it might be possible to bypass this and just call the functions directly from a XBE file, I wanted a portable solution that could support multiplatforms and not just PC, so I ended making this tool anyway. I also wanted to learn the process of recompilation properly.
 
 
 ### Indirect / Virtual Functions
