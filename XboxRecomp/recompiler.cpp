@@ -4498,7 +4498,7 @@ bool Recompiler::Recompile(
         println("\tctx.ebp.u32 = X86_POP(ctx, base);");
         break;
     case ZYDIS_MNEMONIC_RDTSC:
-        println("\tctx.eax.u64 = static_cast<uint32_t>(__rdtsc());");
+        println("\tprintf(\"RDTSC detected! Require patching to handle Xbox speed!!! {:X}\\n\");", base);
         break;
     case ZYDIS_MNEMONIC_STOSD:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REP)
