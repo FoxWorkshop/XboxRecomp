@@ -6190,8 +6190,11 @@ bool Recompiler::Recompile(const Function& fn)
         auto invalidInstr = config.invalidInstructions.find(addr);
         if (invalidInstr != config.invalidInstructions.end())
         {
-            continue;
+            auto addrEnd = addr + invalidInstr->second;
+            auto skipLength = addrEnd - addr;
+            addr += skipLength;
         }
+
 
         if (isAddressRangeBanned(&config.bannedAddresses, addr))
         {
@@ -6361,6 +6364,15 @@ bool Recompiler::Recompile(const Function& fn)
         if (isAddressRangeBanned(&config.bannedAddresses, base))
         {
             base += 1;
+            continue;
+        }
+
+        auto invalidInstr = config.invalidInstructions.find(base);
+        if (invalidInstr != config.invalidInstructions.end())
+        {
+            auto addrEnd = base + invalidInstr->second;
+            auto skipLength = addrEnd - base;
+            base += skipLength;
             continue;
         }
 
