@@ -502,6 +502,8 @@ void Recompiler::Analyse()
 
             //Check for call instructions
             const bool isCall = instruction.mnemonic == ZYDIS_MNEMONIC_CALL;
+            const bool isPush = instruction.mnemonic == ZYDIS_MNEMONIC_PUSH;
+            const bool isMov = instruction.mnemonic == ZYDIS_MNEMONIC_MOV;
             auto nextData = headerSectionData + instruction.length;
 
             if (isCall)
@@ -520,7 +522,6 @@ void Recompiler::Analyse()
                         continue;
                     }
 
-
                     // Check if the target address is within the current section
                     if (isCodeSection(target_address, image.sections) &&
                         image.symbols.find(target_address) == image.symbols.end())
@@ -534,7 +535,7 @@ void Recompiler::Analyse()
                 else if (operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
                 {
                     // Handle indirect jumps/calls (e.g., "jmp [eax]" or "call [ebx+4]")
-                    // For now, we'll skip these since we can't resolve the target address statically.
+                    //we'll skip these since we can't resolve the target address statically.
                     // Will need logic to handle these dynamically during recompilation
 
                     const auto& op = operands[0];
@@ -566,6 +567,34 @@ void Recompiler::Analyse()
 
                     headerSectionData += instruction.length;
                     continue;
+                        }
+                    }
+            else if (isPush || isMov) //check for function that are passed as parameter with push or mov
+            {
+
+                if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE && instruction.length == 5)
+                {
+                    int32_t imm = (int32_t)operands[0].imm.value.s;
+
+                    //is function address valid
+                    if (imm < (int32_t)headerSectionBase || imm >= image.size || duplicateCheck.count(imm))
+                    {
+                    headerSectionData += instruction.length;
+                    continue;
+                }
+
+                    //to avoid false positive we stick to safe function prologue, this will likely miss some real functions, but this is the best compromise I found.
+                    if (IsFunctionStartingWithMovOrPush(section.data, imm, section.base))
+                    {
+
+                        if (isCodeSection(imm, image.sections) &&
+                            image.symbols.find(imm) == image.symbols.end())
+                        {
+
+                            funcsTable.push_back(imm);
+                            duplicateCheck.insert(imm);
+                        }
+                    }
                 }
             }
 
