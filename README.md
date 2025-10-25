@@ -6,7 +6,7 @@ This project was built (and therefore inspired) from [XenonRecomp](https://githu
 
 > [!WARNING]
 > This project isn't a plug and play or a drag drop XBE to EXE converter, this tool ONLY converts the game code to C++, which is NOT going to function correctly without a runtime backing it.
-> You will have to implement a proper backend, emulate Xbox Kernel at minimum, as well as other manual tweaks to make the game working properly.
+> You will have to implement a proper backend, emulate Xbox Kernel (at minimum), implement graphics, sounds, controls as well as other manual tweaks to make the game working properly, an example of a project doing that is [Shadow Recompiled.](https://github.com/FoxWorkshop/ShadowRecomp)
 
 ## Implementation Details
 
