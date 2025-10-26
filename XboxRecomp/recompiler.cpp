@@ -10,12 +10,18 @@
 #include <xbe.h>
 #include <util.h>
 
+
+#define KiB(x) ((x) *    1024 ) // = 0x00000400
+#define MiB(x) ((x) * KiB(1024)) // = 0x00100000
+
+#define NV2A_DEVICE1_BASE 0xFD000000
+#define NV2A_DEVICE1_SIZE (MiB(7)) // = 0x00700000
+
 #define MMIO_BASE  0xFE800000
 #define MMIO_SIZE  0x00800000 
 
-//will get identified when parsing XBE file.
-size_t textBaseAddr = 0x11000;
-size_t endHeader = textBaseAddr;
+#define PHYSICAL_MAP_BASE 0x80000000
+#define PHYSICAL_MAP_SIZE (MiB(256)) // = 0x10000000
 
 
 
@@ -72,6 +78,48 @@ Section GetSectionPerName(const std::set<Section, SectionComparer>& sections, st
     return { "", NULL, 0, (SectionFlags)0, 0 };
 }
 
+bool IsFunctionStartingWithMovOrPush(uint8_t* code, uint64_t baseAddr, size_t codeSize)
+{
+    ZydisDecoder decoder;
+    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
+    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+    ZydisDecodedInstruction instr;
+    int movOrPushCount = 0;
+    bool isPush = false;
+    bool isMov = false;
+    uint8_t* data = code;
+    size_t end = baseAddr + codeSize;
+    uint8_t* func_start = data + (baseAddr - codeSize);
+
+
+    bool looksLikeAscii = true;
+    for (int i = 0; i < 8; ++i)
+    {
+        unsigned char b = func_start[i];
+        if (b < 0x20 || b > 0x7E)
+        {
+            looksLikeAscii = false;
+            break;
+        }
+    }
+
+
+    if (!looksLikeAscii && func_start[0] >= 0x50) //push lowest value is 0x50
+    {
+        if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, func_start, end, &instr, operands)))
+        {
+
+            isPush = instr.mnemonic == ZYDIS_MNEMONIC_PUSH;
+            isMov = instr.mnemonic == ZYDIS_MNEMONIC_MOV;
+            if (isMov && instr.operand_count >= 2 || isPush && instr.operand_count_visible == 1)
+            {
+                movOrPushCount = instr.length;
+            }
+        }
+    }
+
+    return isPush && movOrPushCount >= 1 && movOrPushCount <= 5 || isMov && movOrPushCount >= 2 && movOrPushCount <= 5;
+}
 
 void ExtractFunctionsAddresses(const Section& rdata_section, const Section& text_section, std::vector<size_t>* funcsTable, std::vector<size_t>& out, std::unordered_set<size_t>& dupliCheck)
 {
@@ -111,6 +159,7 @@ void ExtractFunctionsAddresses(const Section& rdata_section, const Section& text
                     if (1)
                         out.push_back(potential_func);
 
+                    out.push_back(potential_func);
                     dupliCheck.insert(potential_func);
                     funcTable_data += sizeof(uint32_t);
 
@@ -189,15 +238,6 @@ void CheckForVftableRef(ZydisDecodedInstruction instruction, ZydisDecodedOperand
 
     }
 }
-
-bool IsSuspiciousAddress(uint32_t address) {
-    // Check for small or unaligned addresses
-    if (address < 0x1000 || (address & 0x3) != 0) {
-        return true;
-    }
-    return false;
-}
-
 
 bool isNextBytesRet(uint8_t* data)
 {
@@ -468,8 +508,6 @@ void Recompiler::Analyse()
 
     ProcessEntryPoint(image, text, funcsTable, duplicateCheck);
 
-    textBaseAddr = text.base;
-    endHeader = getLastAddress(image);
     // Initialize Zydis decoder for x86
     ZydisDecoder decoder;
     ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
@@ -479,6 +517,7 @@ void Recompiler::Analyse()
 
 
     // Process code sections to identify functions
+
     for (const auto& section : image.sections)
     {
         bool isCode = (section.flags & SectionFlags_Code);
@@ -583,7 +622,7 @@ void Recompiler::Analyse()
                     continue;
                 }
 
-                    //to avoid false positive we stick to safe function prologue, this will likely miss some real functions, but this is the best compromise I found.
+                    //to avoid false positive we stick to very basic and safe function prologue, this will likely miss some real functions, but this is the best compromise I found.
                     if (IsFunctionStartingWithMovOrPush(section.data, imm, section.base))
                     {
 
@@ -613,7 +652,7 @@ void Recompiler::Analyse()
 
     ExtractFunctionsAddresses(data, text, &funcArrayRef, funcsTable, duplicateCheck);
 
-    //final pass, browse manually to find any missed functions
+    //final text pass, browse manually to find any missed functions
     for (const auto& section : image.sections)
     {
         bool isCode = (section.flags & SectionFlags_Code);
@@ -3589,6 +3628,9 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.st0() = std::exp2(valDouble0) - 1.0L;");
         println("\t}}");
         break;
+    case ZYDIS_MNEMONIC_IN:
+    case ZYDIS_MNEMONIC_OUT:
+        break; //todo check if this is correct
     case ZYDIS_MNEMONIC_JZ:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) != 0", base, insn);
@@ -6604,6 +6646,9 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
     {
         std::cout << "Base: 0x" << std::hex << pair.first << ", Address: 0x" << pair.second << std::endl;
     }
+
+    std::cout << "Potential wrong analyse " << wrongAnalyse.size() << std::endl;
+
 
     SaveCurrentOutData();
 }

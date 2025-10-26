@@ -8,12 +8,12 @@
 
 const std::string dataSegments[] =
 {
-    ".rdata", ".data", "DOLBY", "PSFD00", ".XTILD"
+    ".rdata", ".data", "DOLBY", ".XTILD"
 };
 
 bool isDataSection(std::string s)
 {
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < 4; i++)
     {
         if (dataSegments[i] == s)
             return true;
