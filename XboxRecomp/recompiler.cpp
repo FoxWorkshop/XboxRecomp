@@ -24,7 +24,6 @@
 #define PHYSICAL_MAP_SIZE (MiB(256)) // = 0x10000000
 
 
-
 bool Recompiler::LoadConfig(const std::string_view& configFilePath)
 {
     printf("Init...\n");
@@ -625,7 +624,6 @@ void Recompiler::Analyse()
                     //to avoid false positive we stick to very basic and safe function prologue, this will likely miss some real functions, but this is the best compromise I found.
                     if (IsFunctionStartingWithMovOrPush(section.data, imm, section.base))
                     {
-
                         if (isCodeSection(imm, image.sections) &&
                             image.symbols.find(imm) == image.symbols.end())
                         {
@@ -729,11 +727,6 @@ void Recompiler::Analyse()
                 if (banned)
                     continue;
 
-                auto invalidInstr = config.invalidInstructions.find(funcPtr);
-                if (invalidInstr != config.invalidInstructions.end())
-                {
-                    continue;
-                }
 
                 functions.emplace_back(Function::Analyze(code, potentialEnd, funcPtr, config.switchTables));
 
@@ -749,6 +742,7 @@ void Recompiler::Analyse()
 
 
     // Process manual functions from config (if any)
+    printf("Process manual functions from config...\n");
     for (auto& [address, size] : config.functions)
     {
         for (auto it = functions.begin(); it != functions.end(); )
@@ -1230,7 +1224,8 @@ bool Recompiler::Recompile(
             return fmt::format("ctx.{}{}", reg_name, suffix);
         };
 
-    auto GetJmpTableRegister = [&](size_t index) {
+    auto GetJmpTableRegister = [&](size_t index) 
+        {
         static constexpr std::array<const char*, 8> reg_names =
         {
             "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"
@@ -1266,7 +1261,8 @@ bool Recompiler::Recompile(
         return fmt::format("ctx.xmm[{}].reg", index);
         };
 
-    auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string {
+    auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string 
+        {
         std::string result;
 
         // Helper to get address-ready register string (always .u32)
@@ -1719,6 +1715,68 @@ bool Recompiler::Recompile(
         return index;
         };
 
+
+    auto midAsmHook = config.midAsmHooks.find(base);
+
+    auto printMidAsmHook = [&]()
+        {
+            bool returnsBool = midAsmHook->second.returnOnFalse || midAsmHook->second.returnOnTrue ||
+                midAsmHook->second.jumpAddressOnFalse != NULL || midAsmHook->second.jumpAddressOnTrue != NULL;
+
+            print("\t");
+            if (returnsBool)
+                print("if (");
+
+            print("{}(", midAsmHook->second.name);
+            for (auto& reg : midAsmHook->second.registers)
+            {
+                if (out.back() != '(')
+                    out += ", ";
+
+                switch (reg[0])
+                {
+                case 'e':
+                    out += "ctx.eflags";
+                    break;
+                case 'r':
+                     out += GetJmpTableRegister(std::atoi(reg.c_str() + 1));
+                    break;
+                }
+            }
+
+            if (returnsBool)
+            {
+                println(")) {{");
+
+                if (midAsmHook->second.returnOnTrue)
+                    println("\t\treturn;");
+                else if (midAsmHook->second.jumpAddressOnTrue != NULL)
+                    println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnTrue);
+
+                println("\t}}");
+
+                println("\telse {{");
+
+                if (midAsmHook->second.returnOnFalse)
+                    println("\t\treturn;");
+                else if (midAsmHook->second.jumpAddressOnFalse != NULL)
+                    println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnFalse);
+
+                println("\t}}");
+            }
+            else
+            {
+                println(");");
+
+                if (midAsmHook->second.ret)
+                    println("\treturn;");
+                else if (midAsmHook->second.jumpAddress != NULL)
+                    println("\tgoto loc_{:X};", midAsmHook->second.jumpAddress);
+            }
+        };
+
+    if (midAsmHook != config.midAsmHooks.end() && !midAsmHook->second.afterInstruction)
+        printMidAsmHook();
 
 
     // Handle x86 instructions
@@ -6253,6 +6311,7 @@ bool Recompiler::Recompile(const Function& fn)
     //Collect labels from jumps and mid-assembly hooks
     for (size_t addr = base; addr < end; addr += insn.length)
     {
+
         size_t offset = addr - base;
         if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, data + offset, end, &insn, operands)))
         {
@@ -6295,7 +6354,8 @@ bool Recompiler::Recompile(const Function& fn)
 
         // Handle mid-assembly hooks
         auto midAsmHook = config.midAsmHooks.find(addr);
-        if (midAsmHook != config.midAsmHooks.end()) {
+        if (midAsmHook != config.midAsmHooks.end()) 
+        {
             if (midAsmHook->second.returnOnFalse || midAsmHook->second.returnOnTrue ||
                 midAsmHook->second.jumpAddressOnFalse != NULL || midAsmHook->second.jumpAddressOnTrue != NULL)
             {
@@ -6636,6 +6696,8 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
             countJmp++;
         }
     }
+
+    printf("\n");
 
     if (wrongAnalyse.size() > 0)
     {
