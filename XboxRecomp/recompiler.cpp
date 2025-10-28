@@ -2671,12 +2671,21 @@ bool Recompiler::Recompile(
         break;
 
     case ZYDIS_MNEMONIC_CMOVNLE:
+    case ZYDIS_MNEMONIC_CMOVLE:
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
 
+            if (insn.insn.mnemonic == ZYDIS_MNEMONIC_CMOVNLE)
+            {
             println("\tif (((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))) {{");
+            }
+            else
+            {
+                println("\tif (((ctx.eflags.value & X86EFlags::ZF) != 0) || (((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0))) {{");
+            }
+
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                 println("\t    {} = {};", get_x86_reg(dst.reg.value),
