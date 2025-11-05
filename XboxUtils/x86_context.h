@@ -852,25 +852,27 @@ struct X87FPU
     };
     uint16_t top = 0; //Stack pointer (0-7)
     uint16_t cw = 0x037F; //Control word (default: round-to-nearest, 64-bit precision)
-    uint16_t sw = 0;  //Status word
+    uint16_t sw = 0;  //Status word tells what's currently happening inside the FPU
     enum : uint16_t {
         C0 = (1 << 8),  // Condition bit 0
         C1 = (1 << 9),  // Condition bit 1
         C2 = (1 << 10), // Condition bit 2 (for FCOS range reduction)
         C3 = (1 << 14)  // Condition bit 3
     };
-    uint16_t tw = 0xFFFF; //Tag word (all empty by default)
+    uint16_t tw = 0xFFFF; //Tag word (all empty by default) describe the "type" of the data in one of the 8 STx registers.
+
+
 
     void push(long double value)
     {
         top = (top - 1) & 7;
 
-        if ((tw & (1 << top)) == 0) {
-            sw |= C0 | C1;
-            if (value != value)
-            {
-                sw |= C2;
-            }
+        // Update TOP bits in SW (bits 11-13)
+        sw = (sw & ~0x3800) | (top << 11);
+
+        // Check for stack overflow
+        if ((tw & (1 << top)) == 0) {  // Register not empty
+            sw |= 0x41;  // Set IE (bit 0) and C1 (bit 9) for stack fault
         }
 
         st[top] = value;
@@ -879,16 +881,18 @@ struct X87FPU
 
     long double pop()
     {
-
-        if (tw & (1 << top))
-        {
-            sw |= C0 | C1;
-            return std::numeric_limits<double>::quiet_NaN();
+        // Check for stack underflow
+        if (tw & (1 << top)) {  // Register is empty
+            sw |= 0x41;  // Set IE and C1 for stack fault
         }
 
         long double val = st[top];
-        tw |= (1 << top);   // Mark register as empty
+        tw |= (1 << top);
         top = (top + 1) & 7;
+
+        // Update TOP bits in SW
+        sw = (sw & ~0x3800) | (top << 11);
+
         return val;
     }
 
@@ -906,7 +910,8 @@ struct X87FPU
     void flag_divzero() { sw |= C0 | C3; }  // For x/0 cases
     void flag_stackfault() { sw |= C0 | C1; }  // Stack overflow/underflow
 
-    void clear_flags() {
+    void clear_flags()
+    {
         sw &= ~(C0 | C1 | C2 | C3);
     }
 
@@ -914,24 +919,48 @@ struct X87FPU
         sw |= C0 | C2 | C3; // Set for NaN comparisons
     }
 
-    void set_compare_flags(bool less, bool equal) {
+    void set_compare_flags(bool less, bool equal)
+    {
         clear_flags();
-        if (less) sw |= C0;
-        else if (equal) sw |= C3;
+
+        if (less)
+            sw |= C0;
+        else if (equal)
+            sw |= C3;
     }
 
-
-    void set_exception_flags(uint8_t exception_type)
+    void set_precision_flag()
     {
-        constexpr uint16_t FLAGS_INVALID = C0 | C2;  // For NaN/Invalid ops
-        constexpr uint16_t FLAGS_DIVZERO = C0 | C3;  // For x/0
-        constexpr uint16_t FLAGS_STACK = C0 | C1;  // Stack faults
+        sw |= (1 << 5); // PE
+        sw |= (1 << 7); // ES
+    }
 
-        switch (exception_type) {
-        case 1:  sw |= FLAGS_INVALID;  break;  // Most common case
-        case 2:  sw |= FLAGS_DIVZERO;  break;  // Common in physics
-        case 3:  sw |= FLAGS_STACK;    break;  // Rare but critical
-        default: sw |= C0;             break;  // Catch-all
+    void set_exception_flags(long double result)
+    {
+        constexpr uint16_t FLAGS_INVALID = 0x01;   // IE bit (bit 0)
+        constexpr uint16_t FLAGS_OVERFLOW = 0x08;  // OE bit (bit 3)
+        constexpr uint16_t FLAGS_PRECISION = 0x20; // PE bit (bit 5)
+
+        uint8_t exception_type = 0;
+
+        if (std::isnan(result))
+            exception_type = 1;
+        else if (std::isinf(result))
+            exception_type = 3;
+
+
+        switch (exception_type)
+        {
+        case 1: sw |= FLAGS_INVALID;   break;
+        case 3: sw |= FLAGS_OVERFLOW;  break;
+        case 4: sw |= FLAGS_PRECISION; break;
+            // default: sw |= FLAGS_PRECISION; break; //Default to precision
+        }
+
+        // Set ES (Exception Summary) bit if any unmasked exceptions
+        uint16_t unmasked = (sw & 0x3F) & ~(cw & 0x3F);
+        if (unmasked) {
+            sw |= 0x80;
         }
     }
 
@@ -955,8 +984,6 @@ struct X87FPU
                 printf("FPU Divide by zero\n");
             }
         }
-
-        sw &= ~0x3F; // Clear exception flags after handling
     }
 
     long double round_to_control(long double value) const
@@ -972,21 +999,18 @@ struct X87FPU
             // case 0x3: 64-bit extended precision (long double) - no truncation
         }
 
-        switch ((cw >> 10) & 0x3) {
-        case 0x0:
-            value = std::nearbyintl(value);
-            break;
-        case 0x1:
-            value = std::floorl(value);
-            break;
-        case 0x2:
-            value = std::ceill(value);
-            break;
-        case 0x3:
-            value = std::truncl(value);
-            break;
-        }
 
+        return value;
+    }
+
+    long double apply_rounding(long double value) const
+    {
+        switch ((cw >> 10) & 0x3) {
+        case 0x0: return std::nearbyintl(value);
+        case 0x1: return std::floorl(value);
+        case 0x2: return std::ceill(value);
+        case 0x3: return std::truncl(value);
+        }
         return value;
     }
 
@@ -994,13 +1018,16 @@ struct X87FPU
     {
         clear_flags();
 
-        if (std::isnan(st0()) || std::isnan(rhs)) {
+        if (std::isnan(st0()) || std::isnan(rhs))
+        {
             sw |= C0 | C2 | C3;
         }
-        else if (st0() < rhs) {
+        else if (st0() < rhs)
+        {
             sw |= C0;
         }
-        else if (st0() == rhs) {
+        else if (st0() == rhs)
+        {
             sw |= C3;
         }
 
@@ -1219,6 +1246,83 @@ inline uint64_t X86_PAVGB(uint64_t dst_val, uint64_t src_val)
     }
 
     return result;
+}
+
+
+
+inline void X87_FPREM(X87FPU& fpu)
+{
+    long double dividend = fpu.st0();
+    long double divisor = fpu.st1();
+    fpu.clear_flags();
+
+    if (divisor == 0.0L) {
+        fpu.sw |= X87FPU::C0;  // invalid
+        return;
+    }
+
+    long double quotient = std::trunc(dividend / divisor);
+    long double remainder = dividend - (quotient * divisor);
+    fpu.st0() = remainder;
+
+    if (std::fabs(quotient) < 4.0) {
+
+        int q_bits = static_cast<int>(quotient) & 0x7;
+        if (q_bits & 1) fpu.sw |= X87FPU::C1;
+        if (q_bits & 2) fpu.sw |= X87FPU::C3;
+        if (q_bits & 4) fpu.sw |= X87FPU::C0;
+    }
+    else
+    {
+        fpu.sw |= X87FPU::C2;
+    }
+}
+
+inline void X87_FXAM(X87FPU& fpu, int32_t top)
+{
+    fpu.clear_flags();
+
+    long double v = fpu.st0();
+    bool is_empty = (fpu.tw & (1u << top)) != 0;
+
+    if (is_empty)
+    {
+        fpu.sw |= X87FPU::C3 | X87FPU::C0;
+        return;
+    }
+
+    if (std::signbit(v))
+    {
+        fpu.sw |= X87FPU::C1;
+    }
+
+    if (std::isnan(v))
+    {
+        fpu.sw |= X87FPU::C0;
+        return;
+    }
+
+    if (std::isinf(v))
+    {
+        fpu.sw |= X87FPU::C2 | X87FPU::C0;
+        return;
+    }
+
+    if (v == 0.0L)
+    {
+        fpu.sw |= X87FPU::C3;
+        return;
+    }
+
+    // Normal or denormal
+    if (std::fpclassify(v) == FP_SUBNORMAL)
+    {
+        fpu.sw |= X87FPU::C3 | X87FPU::C2;
+    }
+    else
+    {
+        fpu.sw |= X87FPU::C2;
+    }
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

@@ -380,7 +380,6 @@ void ProcessEntryPoint(const Image& image, const Section section, std::vector<si
     auto* data = static_cast<const uint8_t*>(image.Find(image.entry_point));
     ZydisDecoder decoder;
     ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
-    ZydisDecodedInstruction insn;
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
 
     size_t addr = image.entry_point;
@@ -1563,13 +1562,14 @@ bool Recompiler::Recompile(
                 println("\tctx.fpu.st0() = valDouble0;");
             }
 
+            println("\tctx.fpu.set_precision_flag();");
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
 
             if (sign == "/")
             {
                 println("\tif (!std::isfinite(valDouble0) && valDouble0 == ctx.fpu.st0() {} 0.0) {{", sign);
-                println("\t    ctx.fpu.sw |= X87FPU::C3; //DIVZERO flag");
-                println("\t    printf(\"FLOATOPERATIONS ZERO DIVIDE\\n\");");
+                println("\t\tctx.fpu.flag_divzero();");
+                println("\t\tprintf(\"FLOATOPERATIONS ZERO DIVIDE\\n\");");
                 println("\t}}");
             }
         };
@@ -2950,7 +2950,7 @@ bool Recompiler::Recompile(
         {
             // Implicit FADDP ST(1), ST(0)
             println("\tctx.fpu.st1() += ctx.fpu.st0();");
-            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+            println("\tctx.fpu.set_precision_flag();");
             println("\tctx.fpu.pop();");
 
         }
@@ -2964,6 +2964,7 @@ bool Recompiler::Recompile(
             {
 
                 println("\tctx.fpu.st{}() += ctx.fpu.st{}();", dest.reg.value - ZYDIS_REGISTER_ST0, src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.set_precision_flag();");
                 println("\tctx.fpu.pop();");
                 println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
             }
@@ -2976,10 +2977,11 @@ bool Recompiler::Recompile(
         println("\tvalDouble0 = ctx.fpu.st0();");
         println("\tctx.fpu.sw &= ~X87FPU::C2;");
         println("\tif (fabs(valDouble0) > 9223372036854775808.0L) {{ // 2^63");
-        println("\t    ctx.fpu.sw |= X87FPU::C2; // Set C2 if out of range");
-        println("\t    ctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.sw |= X87FPU::C2; // Set C2 if out of range");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
-        println("\t    ctx.fpu.st0() = cosl(valDouble0);");
+        println("\t\tctx.fpu.st0() = cosl(valDouble0);");
+        println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
     case ZYDIS_MNEMONIC_FLDLG2:
@@ -2993,11 +2995,13 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FPATAN:
         println("\tlong double st1Temp_{:X} = ctx.fpu.st1();", base);
         println("\tlong double st0Temp_{:X} = ctx.fpu.st0();", base);
+        println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.pop();");
         println("\tctx.fpu.st0() = atan2l(st1Temp_{:X}, st0Temp_{:X});", base, base);
         break;
     case ZYDIS_MNEMONIC_FPTAN:
         println("\tctx.fpu.st0() = std::tanl(ctx.fpu.st0());");
+        println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.push(1.0L);");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         println("\tctx.fpu.sw &= ~X87FPU::C2;");
@@ -3006,11 +3010,12 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.clear_flags();");
         println("\tvalDouble0 = ctx.fpu.st0();");
         println("\tif (fabs(valDouble0) > 9223372036854775808.0L) {{"); // 2^63
-        println("\t    ctx.fpu.set_unordered();");
-        println("\t    ctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.set_unordered();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
-        //  println("\t    ctx.fpu.st0() = ctx.fpu.round_to_control(sin(valDouble0));");
-        println("\t    ctx.fpu.st0() = (sinl(valDouble0));");
+      
+        println("\t\tctx.fpu.st0() = (sinl(valDouble0));");
+        println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
     case ZYDIS_MNEMONIC_FSINCOS:
@@ -3021,12 +3026,11 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t\tctx.fpu.push(std::numeric_limits<long double>::quiet_NaN());");
         println("\t}} else {{");
-        println("\t    valDouble0 = sinl(valDouble2);");
-        println("\t    valDouble1 = cosl(valDouble2);");
-        //println("\t    ctx.fpu.st0() = ctx.fpu.round_to_control(valDouble0);");
-        // println("\t    ctx.fpu.push(ctx.fpu.round_to_control(valDouble1));");
-        println("\t    ctx.fpu.st0() = valDouble0;");
-        println("\t    ctx.fpu.push(valDouble1);");
+        println("\t\tvalDouble0 = sinl(valDouble2);");
+        println("\t\tvalDouble1 = cosl(valDouble2);");
+        println("\t\tctx.fpu.st0() = valDouble0;");
+        println("\t\tctx.fpu.set_precision_flag();");
+        println("\t\tctx.fpu.push(valDouble1);");
         println("\t}}");
         break;
     case ZYDIS_MNEMONIC_FSQRT:
@@ -3035,8 +3039,10 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.flag_invalid();");
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
-        println("\t    ctx.fpu.st0() = sqrtl(ctx.fpu.st0());");
+        println("\t\tctx.fpu.st0() = sqrtl(ctx.fpu.st0());");
+        println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
+
         break;
 
     case ZYDIS_MNEMONIC_FST:
@@ -3082,15 +3088,19 @@ bool Recompiler::Recompile(
             {
                 println("\tctx.fpu.st0() *= {};", get_x86_reg(src.reg.value));
             }
+
+            println("\tctx.fpu.set_precision_flag();");
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         }
         break;
     case ZYDIS_MNEMONIC_FSCALE:
         // FSCALE - Scale ST(0) by power of 2 from ST(1)
         println("\tctx.fpu.clear_flags();");
-        println("\tvalDouble0 = std::trunc(ctx.fpu.st1());");
+      
+        println("\tvalDouble0 = ctx.fpu.apply_rounding(ctx.fpu.st1());");
         println("\tif (valDouble0 >= -16446.0L && valDouble0 <= 16383.0L) {{");
         println("\t\tctx.fpu.st0() = std::ldexp(ctx.fpu.st0(), static_cast<int>(valDouble0));");
+        println("\t\tctx.fpu.set_precision_flag();");
         println("\t}} else {{");
         println("\t\t// Handle overflow/underflow");
         println("\t\tif (valDouble0 > 0) {{");
@@ -3107,6 +3117,7 @@ bool Recompiler::Recompile(
         if (insn.insn.operand_count == 0)
         {
             println("\tctx.fpu.st1() -= ctx.fpu.st0();");
+            println("\tctx.fpu.set_precision_flag();");
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
             println("\tctx.fpu.pop();");
 
@@ -3121,6 +3132,7 @@ bool Recompiler::Recompile(
             {
 
                 println("\tctx.fpu.st{}() -= ctx.fpu.st{}();", dest.reg.value - ZYDIS_REGISTER_ST0, src.reg.value - ZYDIS_REGISTER_ST0);
+                println("\tctx.fpu.set_precision_flag();");
                 println("\tctx.fpu.pop();");
                 println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
             }
@@ -3234,6 +3246,7 @@ bool Recompiler::Recompile(
         if (insn.insn.operand_count == 0)
         {
             println("\tctx.fpu.st1() *= ctx.fpu.st0();");
+            println("\tctx.fpu.set_precision_flag();");
             println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
             println("\tctx.fpu.pop();");
 
@@ -3297,7 +3310,8 @@ bool Recompiler::Recompile(
                     ea(insn.operands[0]));
             }
         }
-        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) 
+        {
             println("\tctx.fpu.clear_flags();");
             println("\tctx.fpu.push(ctx.fpu.st{}());",
                 insn.operands[0].reg.value - ZYDIS_REGISTER_ST0);
@@ -3381,9 +3395,11 @@ bool Recompiler::Recompile(
 
         println("\tif (ctx.fpu.st{}() == 0.0L) {{", src_idx);
         println("\t\tctx.fpu.flag_divzero();");
+
         println("\t\tctx.fpu.pop();");
         println("\t}} else {{");
         println("\t\tctx.fpu.st{}() = ctx.fpu.st{}() / ctx.fpu.st{}();", dst_idx, dst_idx, src_idx);
+        println("\tctx.fpu.set_precision_flag();");
         println("\t\tctx.fpu.pop();");
         println("\t}}");
 
@@ -3429,6 +3445,7 @@ bool Recompiler::Recompile(
             }
 
         }
+        println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FDIVR:
@@ -3598,45 +3615,9 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.st{}() = tmp_{:X};", st_index, base);
         }
         break;
-    case ZYDIS_MNEMONIC_FXAM: //todo clean this mess
+    case ZYDIS_MNEMONIC_FXAM:
     {
-        println("\tctx.fpu.sw &= ~(X87FPU::C0 | X87FPU::C1 | X87FPU::C2 | X87FPU::C3);");
-        println("\tvalDouble0 = ctx.fpu.st0();");
-        println("\tbool is_empty_{} = (ctx.fpu.tw & (1 << ctx.fpu.top)) != 0;", base);
-
-        println("\tif (is_empty_{}) {{", base);
-        println("\t\tctx.fpu.sw |= X87FPU::C3 | X87FPU::C0;");
-        println("\t}} else if (std::isnan(valDouble0)) {{");
-        println("\t\tif (std::signbit(valDouble0)) {{");
-        println("\t\t\tctx.fpu.sw |= X87FPU::C1 | X87FPU::C0;");
-        println("\t\t\t}} else {{");
-        println("\t\t\tctx.fpu.sw |= X87FPU::C1;");
-        println("\t\t\t}}");
-        println("\t\t}} else if (std::isinf(valDouble0)) {{");
-        println("\t\t\tif (std::signbit(valDouble0)) {{");
-        println("\t\t\t\tctx.fpu.sw |= X87FPU::C2 | X87FPU::C0;");
-        println("\t\t\t}} else {{");
-        println("\t\t\t\tctx.fpu.sw |= X87FPU::C2;");
-        println("\t\t\t}}");
-        println("\t\t}} else if (valDouble0 == 0.0) {{");
-        println("\t\t\tif (std::signbit(valDouble0)) {{");
-        println("\t\t\t\tctx.fpu.sw |= X87FPU::C3 | X87FPU::C0;");
-        println("\t\t\t}} else {{");
-        println("\t\t\t\tctx.fpu.sw |= X87FPU::C3;");
-        println("\t\t\t}}");
-        println("\t\t}} else {{");
-        println("\t\t\tif (std::signbit(valDouble0)) {{");
-        println("\t\t\t\tif (std::fpclassify(valDouble0) == FP_SUBNORMAL) {{");
-        println("\t\t\t\t\tctx.fpu.sw |= X87FPU::C3 | X87FPU::C2 | X87FPU::C0;");
-        println("\t\t\t\t}} else {{");
-        println("\t\t\t\t\tctx.fpu.sw |= X87FPU::C0;");
-        println("\t\t\t\t}}");
-        println("\t\t\t}} else {{");
-        println("\t\t\t\tif (std::fpclassify(valDouble0) == FP_SUBNORMAL) {{");
-        println("\t\t\t\t\tctx.fpu.sw |= X87FPU::C3 | X87FPU::C2;");
-        println("\t\t\t\t}}");
-        println("\t\t\t}}");
-        println("\t\t}}");
+        println("\tX87_FXAM(ctx.fpu, ctx.fpu.top);");
     }
     break;
     case ZYDIS_MNEMONIC_FNSTCW:
@@ -3663,17 +3644,20 @@ bool Recompiler::Recompile(
         println("\tcase 3: //Truncate");
         println("\t    ctx.fpu.st0() = std::trunc(ctx.fpu.st0()); break;");
         println("\t}}");
+        println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FYL2X:
         println("\tctx.fpu.st1() = ctx.fpu.st1() * std::log2(ctx.fpu.st0());");
+        println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.pop();");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FWAIT:
-        println("\tif (ctx.fpu.sw & 0x3F) {{");  // Check exception flags
+       /** println("\tif (ctx.fpu.sw & 0x80) {{");  // Check exception flags
         println("\t    ctx.fpu.handle_exceptions();");
-        println("\t}}");
+        println("\t}}");*/
+        println("\t//skipped."); 
         break;
     case ZYDIS_MNEMONIC_F2XM1:
         //F2XM1 - Compute 2^ST(0) - 1
@@ -3692,6 +3676,12 @@ bool Recompiler::Recompile(
         println("\t}} else {{");
         println("\t\tctx.fpu.st0() = std::exp2(valDouble0) - 1.0L;");
         println("\t}}");
+        println("\tctx.fpu.set_precision_flag();");
+
+        break;
+    case ZYDIS_MNEMONIC_FPREM:
+        println("\tX87_FPREM(ctx.fpu);");
+        println("\tctx.fpu.set_precision_flag();");
         break;
     case ZYDIS_MNEMONIC_IN:
     case ZYDIS_MNEMONIC_OUT:
@@ -4408,6 +4398,13 @@ bool Recompiler::Recompile(
         // Operand 0: memory source
         const std::string src = ea(insn.operands[0]);
         println("\tctx.mxcsr = X86_LOAD_U32({});", src);
+        println("\t_MM_SET_ROUNDING_MODE(ctx.mxcsr);");
+    }
+    break;
+    case ZYDIS_MNEMONIC_SAHF:
+    {
+        println("\t// SAHF - Store AH into Flags");
+        println("\tctx.eflags.value = (ctx.eflags.value & 0xFFFFFF00) | ctx.eax.u8_hi;");
     }
     break;
     case ZYDIS_MNEMONIC_SHL:
