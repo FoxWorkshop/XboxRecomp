@@ -155,8 +155,6 @@ void ExtractFunctionsAddresses(const Section& rdata_section, const Section& text
 
                 if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, func_start, text_section.size, &instruction, operands)))
                 {
-                    if (1)
-                        out.push_back(potential_func);
 
                     out.push_back(potential_func);
                     dupliCheck.insert(potential_func);
@@ -1559,11 +1557,7 @@ bool Recompiler::Recompile(
                         println("\t\tprintf(\"FPU_EXCEPTION FLOATOPERATIONS FUNCTION\\n\");");
                     }
                 }
-                else
-                {
-                    base = base;
-                    printf("WHAT\n");
-                }
+
 
                 //For single operand, result always goes to st(0)
                 println("\tctx.fpu.st0() = valDouble0;");
@@ -2632,13 +2626,13 @@ bool Recompiler::Recompile(
             println("\tif ((ctx.eflags.value & X86EFlags::ZF) != 0) {{");
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t    {} = {};", get_x86_reg(dst.reg.value),
+                println("\t\t{} = {};", get_x86_reg(dst.reg.value),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\t    X86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                println("\t\tX86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
@@ -2655,13 +2649,13 @@ bool Recompiler::Recompile(
             println("\tif ((ctx.eflags.value & X86EFlags::ZF) == 0) {{");
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t    {} = {};", get_x86_reg(dst.reg.value),
+                println("\t\t{} = {};", get_x86_reg(dst.reg.value),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\t    X86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                println("\t\tX86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
@@ -2688,13 +2682,13 @@ bool Recompiler::Recompile(
 
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                println("\t    {} = {};", get_x86_reg(dst.reg.value),
+                println("\t\t{} = {};", get_x86_reg(dst.reg.value),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                println("\t    X86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                println("\t\tX86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
                     get_x86_reg(src.reg.value) :
                     fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
@@ -3023,9 +3017,9 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.clear_flags();");
         println("\tvalDouble2 = ctx.fpu.st0();");
         println("\tif (fabs(valDouble2) > 9223372036854775808.0L) {{");
-        println("\t    ctx.fpu.set_unordered();");
-        println("\t    ctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
-        println("\t    ctx.fpu.push(std::numeric_limits<long double>::quiet_NaN());");
+        println("\t\tctx.fpu.set_unordered();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.push(std::numeric_limits<long double>::quiet_NaN());");
         println("\t}} else {{");
         println("\t    valDouble0 = sinl(valDouble2);");
         println("\t    valDouble1 = cosl(valDouble2);");
@@ -3038,8 +3032,8 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FSQRT:
         println("\tctx.fpu.clear_flags();");
         println("\tif (ctx.fpu.st0() < 0.0) {{");
-        println("\t    ctx.fpu.flag_invalid();");
-        println("\t    ctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.flag_invalid();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
         println("\t    ctx.fpu.st0() = sqrtl(ctx.fpu.st0());");
         println("\t}}");
@@ -3317,7 +3311,7 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FLDZ: // Load +0.0
         println("\tctx.fpu.push(0.0L);");
         break;
-    case ZYDIS_MNEMONIC_FNSTSW: // Store FPU Status Word
+    case ZYDIS_MNEMONIC_FNSTSW: //(FSTSW) Store FPU Status Word
 
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
             insn.operands[0].reg.value == ZYDIS_REGISTER_AX) {
@@ -3686,7 +3680,11 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.clear_flags();");
         println("\tvalDouble0 = ctx.fpu.st0();");
         println("\tif (valDouble0 < -1.0L || valDouble0 > 1.0L) {{");
-        println("\t\tctx.fpu.sw |= ctx.fpu.C2;");
+        //println("\t\tctx.fpu.sw |= ctx.fpu.C2;");
+        println("\t\tctx.fpu.sw |= (1 << 10);");
+        println("\t}}");
+        println("\telse {{");
+        println("\t\tctx.fpu.sw &= ~(1 << 10);");
         println("\t}}");
         println("\tif (std::abs(valDouble0) < 1e-8L) {{");
         println("\t\t//For small x, use Taylor series.");
