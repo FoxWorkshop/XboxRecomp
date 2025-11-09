@@ -2696,6 +2696,30 @@ bool Recompiler::Recompile(
             println("\t}}");
         }
         break;
+    case ZYDIS_MNEMONIC_CMOVBE: //todo check if this is correct
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            println("\tif ((ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)) != 0) {{");
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            {
+                println("\t\t{} = {};", get_x86_reg(dst.reg.value),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\t\tX86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            println("\t}}");
+        }
+        break;
     case ZYDIS_MNEMONIC_COMISS:
         if (insn.insn.operand_count >= 2)
         {
@@ -2985,8 +3009,14 @@ bool Recompiler::Recompile(
         println("\t}}");
         break;
     case ZYDIS_MNEMONIC_FLDLG2:
-        println("\tctx.fpu.push(std::log2(10.0L));");
+        println("\tctx.fpu.push(0.30102999566398119521373889472449L);");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        break;
+    case ZYDIS_MNEMONIC_FLDL2E:
+        println("\tctx.fpu.push(M_LOG2E);");
+        break;
+    case ZYDIS_MNEMONIC_FLDLN2:
+        println("\tctx.fpu.push(std::log(2.0L));");
         break;
     case ZYDIS_MNEMONIC_FNCLEX:
         println("\tctx.fpu.sw &= ~0x3F; //Clear all exception flags (bits 0-5)");
