@@ -602,8 +602,8 @@ void Recompiler::Analyse()
 
                     headerSectionData += instruction.length;
                     continue;
-                        }
-                    }
+                }
+            }
             else if (isPush || isMov) //check for function that are passed as parameter with push or mov
             {
 
@@ -614,9 +614,9 @@ void Recompiler::Analyse()
                     //is function address valid
                     if (imm < (int32_t)headerSectionBase || imm >= image.size || duplicateCheck.count(imm))
                     {
-                    headerSectionData += instruction.length;
-                    continue;
-                }
+                        headerSectionData += instruction.length;
+                        continue;
+                    }
 
                     //to avoid false positive we stick to very basic and safe function prologue, this will likely miss some real functions, but this is the best compromise I found.
                     if (IsFunctionStartingWithMovOrPush(section.data, imm, section.base))
@@ -745,6 +745,14 @@ void Recompiler::Analyse()
         for (auto it = functions.begin(); it != functions.end(); )
         {
             auto funcEnd = it->base + it->size;
+
+#ifdef _DEBUG
+            if (address == it->base && ((funcEnd == address + size) || (funcEnd == address + size - 1)))
+            {
+                printf("%x is fixed! FuncEnd from config %x, FuncEnd from existing functions %x\n", address, address + size, funcEnd);
+            }
+#endif
+
 
             if (address == it->base || (funcEnd > address && funcEnd <= address + size))
             {
@@ -1067,6 +1075,14 @@ inline bool is_mmio_address(uint32_t addr) {
     return addr >= MMIO_BASE && addr < (MMIO_BASE + MMIO_SIZE);
 }
 
+inline bool is_nv2a_address(uint32_t addr) {
+    return addr >= NV2A_DEVICE1_BASE && addr < (NV2A_DEVICE1_BASE + NV2A_DEVICE1_SIZE);
+}
+
+inline bool is_physical_map_address(uint32_t addr) {
+    return addr >= PHYSICAL_MAP_BASE && addr < (PHYSICAL_MAP_BASE + PHYSICAL_MAP_SIZE);
+}
+
 
 inline std::string GetMMIOArray(uint32_t addr, const int size)
 {
@@ -1088,6 +1104,31 @@ inline std::string GetMMIOArray(uint32_t addr, const int size)
         break;
     case 32:
         string = "*(uint32_t*)&" + (std::string)"g_mmio[" + offsetString + "]";
+    }
+
+    return string;
+}
+
+inline std::string GetNV2AArray(uint32_t addr, const int size)
+{
+    if (!is_nv2a_address(addr))
+        return "";
+
+    uint32_t offset = addr - NV2A_DEVICE1_BASE;
+    std::string offsetString = std::to_string(offset);
+    std::string string = "/* error offset g_nv2a*/;";
+
+
+    switch (size)
+    {
+    case 8:
+        string = "g_nv2a[" + offsetString + "]";
+        break;
+    case 16:
+        string = "*(uint16_t*)&" + (std::string)"g_nv2a[" + offsetString + "]";
+        break;
+    case 32:
+        string = "*(uint32_t*)&" + (std::string)"g_nv2a[" + offsetString + "]";
     }
 
     return string;
@@ -1221,20 +1262,20 @@ bool Recompiler::Recompile(
             return fmt::format("ctx.{}{}", reg_name, suffix);
         };
 
-    auto GetJmpTableRegister = [&](size_t index) 
+    auto GetJmpTableRegister = [&](size_t index)
         {
-        static constexpr std::array<const char*, 8> reg_names =
-        {
-            "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"
-        };
+            static constexpr std::array<const char*, 8> reg_names =
+            {
+                "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"
+            };
 
-        if (index >= reg_names.size())
-        {
-            throw std::runtime_error("Invalid x86 register index");
-        }
+            if (index >= reg_names.size())
+            {
+                throw std::runtime_error("Invalid x86 register index");
+            }
 
 
-        return fmt::format("ctx.{}", reg_names[index]);
+            return fmt::format("ctx.{}", reg_names[index]);
         };
 
 
@@ -1258,62 +1299,62 @@ bool Recompiler::Recompile(
         return fmt::format("ctx.xmm[{}].reg", index);
         };
 
-    auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string 
+    auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string
         {
-        std::string result;
+            std::string result;
 
-        // Helper to get address-ready register string (always .u32)
-        auto get_addr_reg = [&](ZydisRegister reg) -> std::string
+            // Helper to get address-ready register string (always .u32)
+            auto get_addr_reg = [&](ZydisRegister reg) -> std::string
+                {
+                    switch (ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_COMPAT_32, reg)) {
+                    case ZYDIS_REGISTER_EAX:
+                        return "ctx.eax.u32";
+                    case ZYDIS_REGISTER_EBX:
+                        return "ctx.ebx.u32";
+                    case ZYDIS_REGISTER_ECX:
+                        return "ctx.ecx.u32";
+                    case ZYDIS_REGISTER_EDX:
+                        return "ctx.edx.u32";
+                    case ZYDIS_REGISTER_ESI:
+                        return "ctx.esi.u32";
+                    case ZYDIS_REGISTER_EDI:
+                        return "ctx.edi.u32";
+                    case ZYDIS_REGISTER_EBP:
+                        return "ctx.ebp.u32";
+                    case ZYDIS_REGISTER_ESP:
+                        return "ctx.esp.u32";
+
+                    default: throw std::runtime_error("Unsupported address register");
+                    }
+                };
+
+            // Add base register (if present)
+            if (memOp.mem.base != ZYDIS_REGISTER_NONE)
+                result += get_addr_reg(memOp.mem.base);
+
+            // Add index register (if present)
+            if (memOp.mem.index != ZYDIS_REGISTER_NONE)
             {
-                switch (ZydisRegisterGetLargestEnclosing(ZYDIS_MACHINE_MODE_LONG_COMPAT_32, reg)) {
-                case ZYDIS_REGISTER_EAX:
-                    return "ctx.eax.u32";
-                case ZYDIS_REGISTER_EBX:
-                    return "ctx.ebx.u32";
-                case ZYDIS_REGISTER_ECX:
-                    return "ctx.ecx.u32";
-                case ZYDIS_REGISTER_EDX:
-                    return "ctx.edx.u32";
-                case ZYDIS_REGISTER_ESI:
-                    return "ctx.esi.u32";
-                case ZYDIS_REGISTER_EDI:
-                    return "ctx.edi.u32";
-                case ZYDIS_REGISTER_EBP:
-                    return "ctx.ebp.u32";
-                case ZYDIS_REGISTER_ESP:
-                    return "ctx.esp.u32";
-
-                default: throw std::runtime_error("Unsupported address register");
+                if (!result.empty()) result += " + ";
+                result += get_addr_reg(memOp.mem.index);
+                if (memOp.mem.scale > 1) {
+                    result += " * " + std::to_string(memOp.mem.scale);
                 }
-            };
-
-        // Add base register (if present)
-        if (memOp.mem.base != ZYDIS_REGISTER_NONE)
-            result += get_addr_reg(memOp.mem.base);
-
-        // Add index register (if present)
-        if (memOp.mem.index != ZYDIS_REGISTER_NONE)
-        {
-            if (!result.empty()) result += " + ";
-            result += get_addr_reg(memOp.mem.index);
-            if (memOp.mem.scale > 1) {
-                result += " * " + std::to_string(memOp.mem.scale);
             }
-        }
 
-        // Add displacement
-        if (memOp.mem.disp.value != 0)
-        {
-            if (!result.empty()) {
-                result += (memOp.mem.disp.value > 0) ? " + " : " - ";
-                result += std::to_string(abs(memOp.mem.disp.value));
+            // Add displacement
+            if (memOp.mem.disp.value != 0)
+            {
+                if (!result.empty()) {
+                    result += (memOp.mem.disp.value > 0) ? " + " : " - ";
+                    result += std::to_string(abs(memOp.mem.disp.value));
+                }
+                else {
+                    result = std::to_string(memOp.mem.disp.value);
+                }
             }
-            else {
-                result = std::to_string(memOp.mem.disp.value);
-            }
-        }
 
-        return result.empty() ? "0" : result;
+            return result.empty() ? "0" : result;
         };
 
 
@@ -1552,8 +1593,7 @@ bool Recompiler::Recompile(
                     }
                     else
                     {
-                        base = base;
-                        println("\t\tprintf(\"FPU_EXCEPTION FLOATOPERATIONS FUNCTION\\n\");");
+                        println("\t\tprintf(\"FPU_EXCEPTION FLOATOPERATIONS FUNCTION {}\\n\");", base);
                     }
                 }
 
@@ -1569,7 +1609,7 @@ bool Recompiler::Recompile(
             {
                 println("\tif (!std::isfinite(valDouble0) && valDouble0 == ctx.fpu.st0() {} 0.0) {{", sign);
                 println("\t\tctx.fpu.flag_divzero();");
-                println("\t\tprintf(\"FLOATOPERATIONS ZERO DIVIDE\\n\");");
+                println("\t\tprintf(\"FLOATOPERATIONS ZERO DIVIDE {}\\n\");", base);
                 println("\t}}");
             }
         };
@@ -1625,19 +1665,6 @@ bool Recompiler::Recompile(
             }
         };
 
-    auto compare_and_pop = [&](const std::string& rhs) {
-        println("\tctx.fpu.sw &= ~(X87FPU::C0 | X87FPU::C1 | X87FPU::C2 | X87FPU::C3);");
-        println("\tif (std::isnan(ctx.fpu.st0()) || std::isnan({})) {{", rhs);
-        println("\t\tctx.fpu.sw |= X87FPU::C0 | X87FPU::C2 | X87FPU::C3;");
-        println("\t}} else if (ctx.fpu.st0() < {}) {{", rhs);
-        println("\t\tctx.fpu.sw |= X87FPU::C0;");
-        println("\t}} else if (ctx.fpu.st0() > {}) {{", rhs);
-        println("\t\tctx.fpu.sw &= ~X87FPU::C0;");
-        println("\t}} else {{ // equal");
-        println("\t\tctx.fpu.sw |= X87FPU::C3;");
-        println("\t}}");
-        println("\tctx.fpu.pop();");
-        };
 
     auto format_operand = [&](const ZydisDecodedOperand& op, const char* size_suffix = "U32") -> std::string {
         if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
@@ -1733,7 +1760,7 @@ bool Recompiler::Recompile(
                     out += "ctx.eflags";
                     break;
                 case 'r':
-                     out += GetJmpTableRegister(std::atoi(reg.c_str() + 1));
+                    out += GetJmpTableRegister(std::atoi(reg.c_str() + 1));
                     break;
                 }
             }
@@ -1959,7 +1986,7 @@ bool Recompiler::Recompile(
                 auto kernelAddr = ResolveKernelCall(offset);
                 if (kernelAddr)
                 {
-                    funcConfig.isRegKernelAddr = true; 
+                    funcConfig.isRegKernelAddr = true;
                     funcConfig.RegisterKernelAddr = (uint32_t)offset;
                 }
             }
@@ -2017,7 +2044,7 @@ bool Recompiler::Recompile(
 
 
             //DS can be hardware Xbox 
-           //In that case, we identify MMIO access and redirect the addresses to a global array. 
+           //In that case, we identify MMIO access and redirect the addresses to a global array
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_DS) //read
             {
                 uint32_t offset = (uint32_t)src.mem.disp.value;
@@ -2026,6 +2053,12 @@ bool Recompiler::Recompile(
                     println("\t{} = {};  //Read DS Hardware variable", get_x86_reg(dst.reg.value), GetMMIOArray(offset, src.size));
                     break;
                 }
+                else if (is_nv2a_address(offset))
+                {
+                    println("\t{} = {};  //Read DS Hardware variable", get_x86_reg(dst.reg.value), GetNV2AArray(offset, src.size));
+                    break;
+                }
+
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_DS) //write
             {
@@ -2033,6 +2066,16 @@ bool Recompiler::Recompile(
                 if (is_mmio_address(offset))
                 {
                     println("\t{} = {};  //Write in DS Hardware memory", GetMMIOArray(offset, dst.size), get_x86_reg(src.reg.value));
+                    break;
+                }
+                else if (is_nv2a_address(offset))
+                {
+                    println("\t{} = {};  //Write in DS Hardware memory", GetNV2AArray(offset, dst.size), get_x86_reg(src.reg.value));
+                    break;
+                }
+                else if (is_physical_map_address(offset))
+                {
+                    println("\t//skip write in physical memory");
                     break;
                 }
             }
@@ -2673,7 +2716,7 @@ bool Recompiler::Recompile(
 
             if (insn.insn.mnemonic == ZYDIS_MNEMONIC_CMOVNLE)
             {
-            println("\tif (((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))) {{");
+                println("\tif (((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))) {{");
             }
             else
             {
@@ -2704,7 +2747,7 @@ bool Recompiler::Recompile(
 
             println("\tif ((ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)) != 0) {{");
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) 
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
                 println("\t\t{} = {};", get_x86_reg(dst.reg.value),
                     src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
@@ -2793,7 +2836,7 @@ bool Recompiler::Recompile(
                     println("\t\tptr_{} = 0x{:X};", base, funcConfig.RegisterKernelAddr);
                     println("\t}}");
                 }
-         
+
                 println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                 println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
             }
@@ -3043,7 +3086,7 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.set_unordered();");
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
-      
+
         println("\t\tctx.fpu.st0() = (sinl(valDouble0));");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
@@ -3080,15 +3123,20 @@ bool Recompiler::Recompile(
         {
             println("\tctx.fpu.st{}() = ctx.fpu.st0();", insn.operands[0].reg.value - ZYDIS_REGISTER_ST0);
         }
-        else {
+        else
+        {
             if (insn.operands[0].size == 32)
             {
                 println("\tX86_STORE_F32({}, ctx.fpu.st0());", ea(insn.operands[0]));
             }
-            else
+            else if (insn.operands[0].size == 64)
             {
                 insn.operands[0].size = insn.operands[0].size;
                 println("\tX86_STORE_F64({}, ctx.fpu.st0());", ea(insn.operands[0]));
+            }
+            else if (insn.operands[0].size == 80)
+            {
+                println("\tX86_STORE_F80({}, ctx.fpu.st0());", ea(insn.operands[0]));
             }
         }
         break;
@@ -3126,7 +3174,7 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FSCALE:
         // FSCALE - Scale ST(0) by power of 2 from ST(1)
         println("\tctx.fpu.clear_flags();");
-      
+
         println("\tvalDouble0 = ctx.fpu.apply_rounding(ctx.fpu.st1());");
         println("\tif (valDouble0 >= -16446.0L && valDouble0 <= 16383.0L) {{");
         println("\t\tctx.fpu.st0() = std::ldexp(ctx.fpu.st0(), static_cast<int>(valDouble0));");
@@ -3317,12 +3365,17 @@ bool Recompiler::Recompile(
             {
                 println("\tX86_STORE_F32({}, ctx.fpu.st0());", ea(insn.operands[0]));
             }
-            else
+            else if (insn.operands[0].size == 64)
             {
-                insn.operands[0].size = insn.operands[0].size;
                 println("\tX86_STORE_F64({}, ctx.fpu.st0());", ea(insn.operands[0]));
             }
+            else if (insn.operands[0].size == 80)
+            {
+                println("\tX86_STORE_F80({}, ctx.fpu.st0());", ea(insn.operands[0]));
+            }
+
             println("\tctx.fpu.pop();");
+            println("\tctx.fpu.sw = (ctx.fpu.sw & ~0x3800) | X87FPU::C1;"); //check if this is needed
         }
         break;
 
@@ -3335,12 +3388,18 @@ bool Recompiler::Recompile(
                 println("\tctx.fpu.push(X86_LOAD_F32({}));",
                     ea(insn.operands[0]));
             }
-            else {
+            else if (insn.operands[0].size == 64)
+            {
                 println("\tctx.fpu.push(X86_LOAD_F64({}));",
                     ea(insn.operands[0]));
             }
+            else if (insn.operands[0].size == 80)
+            {
+                println("\tctx.fpu.push(X86_LOAD_F80({}));",
+                    ea(insn.operands[0]));
+            }
         }
-        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) 
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
             println("\tctx.fpu.clear_flags();");
             println("\tctx.fpu.push(ctx.fpu.st{}());",
@@ -3354,6 +3413,9 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FLDZ: // Load +0.0
         println("\tctx.fpu.push(0.0L);");
+        break;
+    case ZYDIS_MNEMONIC_FLDPI:
+        println("\tctx.fpu.push(M_PI);");
         break;
     case ZYDIS_MNEMONIC_FNSTSW: //(FSTSW) Store FPU Status Word
 
@@ -3384,55 +3446,18 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.pop();");
         }
         break;
+    case ZYDIS_MNEMONIC_FUCOMP: // Unordered Compare and Pop Once
+        println("\t\tctx.fpu.compare_and_pop(ctx.fpu.st1(), 1, false);");
+        break;
     case ZYDIS_MNEMONIC_FUCOMPP: // Unordered Compare and Pop Twice
-        println("\t\tctx.fpu.compare_and_pop(ctx.fpu.st1());");
-        println("\t\tctx.fpu.pop();");
+        println("\t\tctx.fpu.compare_and_pop(ctx.fpu.st1(), 2, false);");
         break;
     case ZYDIS_MNEMONIC_FDIV:
         floatOperations("/", insn.operands[0].size);
         break;
     case ZYDIS_MNEMONIC_FDIVP:
     {
-        const ZydisDecodedOperand* dst = nullptr;
-        const ZydisDecodedOperand* src = nullptr;
-
-        if (insn.insn.operand_count >= 2)
-        {
-            // Find explicit or implicit ST(i), ST(0)
-            for (size_t i = 0; i < insn.insn.operand_count; ++i)
-            {
-                if (insn.operands[i].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                    insn.operands[i].reg.value >= ZYDIS_REGISTER_ST0 &&
-                    insn.operands[i].reg.value <= ZYDIS_REGISTER_ST7)
-                {
-                    if (!dst)
-                        dst = &insn.operands[i];
-                    else
-                        src = &insn.operands[i];
-                }
-            }
-        }
-
-        // If operands not found (0 or 1), assume FDIVP ST1, ST0
-        uint8_t dst_idx = 1;
-        uint8_t src_idx = 0;
-
-        if (dst && src)
-        {
-            dst_idx = dst->reg.value - ZYDIS_REGISTER_ST0;
-            src_idx = src->reg.value - ZYDIS_REGISTER_ST0;
-        }
-
-        println("\tif (ctx.fpu.st{}() == 0.0L) {{", src_idx);
-        println("\t\tctx.fpu.flag_divzero();");
-
-        println("\t\tctx.fpu.pop();");
-        println("\t}} else {{");
-        println("\t\tctx.fpu.st{}() = ctx.fpu.st{}() / ctx.fpu.st{}();", dst_idx, dst_idx, src_idx);
-        println("\tctx.fpu.set_precision_flag();");
-        println("\t\tctx.fpu.pop();");
-        println("\t}}");
-
+        println("\tX87_FDIVP(ctx.fpu);");
     }
     break;
     case ZYDIS_MNEMONIC_FIDIV:
@@ -3607,6 +3632,11 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.compare_and_pop(ctx.fpu.st{}(), 2);", get_st_index(insn.operands[0].reg.value));
         }
         break;
+    case ZYDIS_MNEMONIC_FFREE:
+    {
+        println("\tctx.fpu.ffree(ctx.fpu.st{}());", get_st_index(insn.operands[0].reg.value));
+    }
+    break;
     case ZYDIS_MNEMONIC_FISTP:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
@@ -3684,10 +3714,10 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FWAIT:
-       /** println("\tif (ctx.fpu.sw & 0x80) {{");  // Check exception flags
-        println("\t    ctx.fpu.handle_exceptions();");
-        println("\t}}");*/
-        println("\t//skipped."); 
+        /** println("\tif (ctx.fpu.sw & 0x80) {{");  // Check exception flags
+         println("\t    ctx.fpu.handle_exceptions();");
+         println("\t}}");*/
+        println("\t//skipped.");
         break;
     case ZYDIS_MNEMONIC_F2XM1:
         //F2XM1 - Compute 2^ST(0) - 1
@@ -3701,7 +3731,6 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.sw &= ~(1 << 10);");
         println("\t}}");
         println("\tif (std::abs(valDouble0) < 1e-8L) {{");
-        println("\t\t//For small x, use Taylor series.");
         println("\t\tctx.fpu.st0() = valDouble0 * 0.6931471805599453094172321214581766L;");
         println("\t}} else {{");
         println("\t\tctx.fpu.st0() = std::exp2(valDouble0) - 1.0L;");
@@ -5673,7 +5702,7 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            uint32_t operand_size = dst.size; 
+            uint32_t operand_size = dst.size;
 
             std::string temp = "temp_" + std::to_string(base);
             std::string result = "result_" + std::to_string(base);
@@ -6388,7 +6417,7 @@ bool Recompiler::Recompile(const Function& fn)
 
         // Handle mid-assembly hooks
         auto midAsmHook = config.midAsmHooks.find(addr);
-        if (midAsmHook != config.midAsmHooks.end()) 
+        if (midAsmHook != config.midAsmHooks.end())
         {
             if (midAsmHook->second.returnOnFalse || midAsmHook->second.returnOnTrue ||
                 midAsmHook->second.jumpAddressOnFalse != NULL || midAsmHook->second.jumpAddressOnTrue != NULL)
@@ -6610,7 +6639,6 @@ bool Recompiler::Recompile(const Function& fn)
 void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
 {
     out.reserve(10 * 1024 * 1024);
-
     {
         println("#pragma once");
 
@@ -6703,7 +6731,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
             println("#include \"x86_recomp_shared.h\"\n");
         }
 
-        if ((i % 120) == 0 || (i == (functions.size() - 1)))
+        if ((i % 180) == 0 || (i == (functions.size() - 1)))
             fmt::println("Recompiling functions... {}%", static_cast<float>(i + 1) / functions.size() * 100.0f);
 
 
@@ -6743,7 +6771,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
         std::cout << "Base: 0x" << std::hex << pair.first << ", Address: 0x" << pair.second << std::endl;
     }
 
-    std::cout << "Potential wrong analyse " << wrongAnalyse.size() << std::endl;
+    std::cout << "Potential wrong analyse " << std::dec << wrongAnalyse.size() << std::endl;
 
 
     SaveCurrentOutData();

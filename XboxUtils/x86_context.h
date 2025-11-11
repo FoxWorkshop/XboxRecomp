@@ -27,6 +27,14 @@
 #include <smmintrin.h>
 #endif
 
+#ifndef M_LOG2E
+#define M_LOG2E 1.44269504088896340735992468100189214L
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846L
+#endif
+
 #define X86_JOIN(x, y) x##y
 #define X86_XSTRINGIFY(x) #x
 #define X86_STRINGIFY(x) X86_XSTRINGIFY(x)
@@ -43,6 +51,7 @@
 
 #define X86_LOAD_F32(addr) (*reinterpret_cast<volatile float*>(base + (addr)))
 #define X86_LOAD_F64(addr) (*reinterpret_cast<volatile double*>(base + (addr)))
+#define X86_LOAD_F80(addr) (*reinterpret_cast<volatile long double*>(base + (addr)))
 
 //Memory Store Macros
 #define X86_STORE_U8(addr, value)  (*reinterpret_cast<volatile uint8_t*>(base + (addr)) = (value))
@@ -53,6 +62,7 @@
 //Floating point variants
 #define X86_STORE_F32(addr, value) (*reinterpret_cast<volatile float*>(base + (addr)) = static_cast<float>(value))
 #define X86_STORE_F64(addr, value) (*reinterpret_cast<volatile double*>(base + (addr)) = static_cast<double>(value))
+#define X86_STORE_F80(addr, value) (*reinterpret_cast<volatile long double*>(base + (addr)) = static_cast<long double>(value))
 
 // SSE Load/Store 128-bit Macros
 #define XMM_F32(reg, idx) (ctx.xmm[reg].f32[idx])
@@ -112,6 +122,7 @@
 
 
 extern uint8_t g_mmio[];
+extern uint8_t g_nv2a[];
 
 typedef void X86Func(struct X86Context& __restrict__ ctx, uint8_t* base);
 
@@ -870,32 +881,52 @@ struct X87FPU
         // Update TOP bits in SW (bits 11-13)
         sw = (sw & ~0x3800) | (top << 11);
 
-        // Check for stack overflow
-        if ((tw & (1 << top)) == 0) {  // Register not empty
-            sw |= 0x41;  // Set IE (bit 0) and C1 (bit 9) for stack fault
+        int tag_pos = top * 2;  // 2 bits per register
+
+        // Check for stack overflow - use 2-bit tag check
+        int current_tag = (tw >> tag_pos) & 3;
+        if (current_tag != 3) {  // Register not empty (tag != 11)
+            sw |= 0x41;
+            return;
         }
 
         st[top] = value;
-        tw &= ~(1 << top);  // Mark register as used
+
+        // Clear both bits for this register (set to 00 = valid)
+        tw &= ~(3 << tag_pos);
     }
 
     long double pop()
     {
-        // Check for stack underflow
-        if (tw & (1 << top)) {  // Register is empty
-            sw |= 0x41;  // Set IE and C1 for stack fault
-        }
+        // Check for stack underflow using 2-bit tags
+        int tag_pos = top * 2;
+        int current_tag = (tw >> tag_pos) & 3;
 
+        if (current_tag == 3)
+        {  // Register is already empty
+            sw |= 0x41;  // Set IE and C1 for stack fault
+            return std::numeric_limits<long double>::quiet_NaN();
+        }
         long double val = st[top];
-        tw |= (1 << top);
+
+        // Mark register as empty (tag = 11)
+        tw |= (3 << tag_pos);
+
+        // Update top
         top = (top + 1) & 7;
 
-        // Update TOP bits in SW
+        // Update TOP bits in SW (bits 11-13)
         sw = (sw & ~0x3800) | (top << 11);
 
         return val;
     }
 
+    void ffree(int8_t i)
+    {
+        int physical_reg = (top + i) & 7;
+        int tag_pos = physical_reg * 2;
+        tw = (tw & ~(3 << tag_pos)) | ((0b11 & 3) << tag_pos);
+    }
 
     long double& st0() { return st[top]; }
     long double& st1() { return st[(top + 1) & 7]; }
@@ -905,6 +936,30 @@ struct X87FPU
     long double& st5() { return st[(top + 5) & 7]; }
     long double& st6() { return st[(top + 6) & 7]; }
     long double& st7() { return st[(top + 7) & 7]; }
+
+    long double& getST(uint8_t index)
+    {
+        switch (index)
+        {
+        case 0:
+        default:
+            return st0();
+        case 1:
+            return st1();
+        case 2:
+            return st2();
+        case 3:
+            return st3();
+        case 4:
+            return st4();
+        case 5:
+            return st5();
+        case 6:
+            return st6();
+        case 7:
+            return st7();
+        }
+    }
 
     void flag_invalid() { sw |= C0 | C2; }  // For NaN/Invalid ops
     void flag_divzero() { sw |= C0 | C3; }  // For x/0 cases
@@ -932,7 +987,6 @@ struct X87FPU
     void set_precision_flag()
     {
         sw |= (1 << 5); // PE
-        sw |= (1 << 7); // ES
     }
 
     void set_exception_flags(long double result)
@@ -1014,43 +1068,56 @@ struct X87FPU
         return value;
     }
 
-    void compare_and_pop(long double rhs, int pops = 0)
+    void compare_and_pop(long double rhs, int pops = 0, bool ordered = true)
     {
         clear_flags();
+        bool st0_nan = std::isnan(st0());
+        bool rhs_nan = std::isnan(rhs);
 
-        if (std::isnan(st0()) || std::isnan(rhs))
+        if (st0_nan || rhs_nan)
         {
-            sw |= C0 | C2 | C3;
+            sw |= X87FPU::C0 | X87FPU::C2 | X87FPU::C3;
+
+            // For ordered comparisons (FCOM/FCOMP), set Invalid Operation
+            if (ordered)
+                sw |= 0x01; // IE flag
         }
         else if (st0() < rhs)
         {
-            sw |= C0;
+            sw |= X87FPU::C0;  // ST0 < rhs
         }
-        else if (st0() == rhs)
+        else if (st0() > rhs)
         {
-            sw |= C3;
+            // ST0 > rhs: no flags set (C3=0, C2=0, C0=0)
+        }
+        else  // fpu.st0() == rhs
+        {
+            sw |= X87FPU::C3;  // ST0 == rhs
         }
 
-        while (pops--) pop();
+        while (pops--) 
+            pop();
     }
 
     void compare_and_set_eflags(long double lhs, long double rhs, X86EFlags& eflags)
     {
-        if (std::isnan(lhs) || std::isnan(rhs))
+        if (std::isnan(lhs) || std::isnan(rhs)) //is unordered
         {
             eflags.value |= X86EFlags::ZF | X86EFlags::PF | X86EFlags::CF;
         }
-        else if (lhs > rhs) {
-            eflags.value &= ~(X86EFlags::ZF | X86EFlags::CF);
+        else if (lhs > rhs) 
+        {
+            eflags.value &= ~(X86EFlags::ZF | X86EFlags::CF | X86EFlags::PF);
         }
         else if (lhs < rhs)
         {
             eflags.value |= X86EFlags::CF;
-            eflags.value &= ~X86EFlags::ZF;
+            eflags.value &= ~(X86EFlags::ZF | X86EFlags::PF);
         }
-        else {
+        else  //equals
+        {
             eflags.value |= X86EFlags::ZF;
-            eflags.value &= ~X86EFlags::CF;
+            eflags.value &= ~(X86EFlags::CF | X86EFlags::PF);
         }
     }
 
@@ -1282,47 +1349,82 @@ inline void X87_FXAM(X87FPU& fpu, int32_t top)
 {
     fpu.clear_flags();
 
-    long double v = fpu.st0();
-    bool is_empty = (fpu.tw & (1u << top)) != 0;
+    long double v = fpu.st[top];
 
-    if (is_empty)
-    {
-        fpu.sw |= X87FPU::C3 | X87FPU::C0;
-        return;
-    }
+    //Get the 2-bit tag for the current register
+    int tag = (fpu.tw >> (top * 2)) & 3;
 
-    if (std::signbit(v))
-    {
-        fpu.sw |= X87FPU::C1;
-    }
-
-    if (std::isnan(v))
-    {
-        fpu.sw |= X87FPU::C0;
-        return;
-    }
-
-    if (std::isinf(v))
-    {
-        fpu.sw |= X87FPU::C2 | X87FPU::C0;
-        return;
-    }
-
-    if (v == 0.0L)
-    {
+    if (tag == 3) {  //Empty
         fpu.sw |= X87FPU::C3;
         return;
     }
 
-    // Normal or denormal
-    if (std::fpclassify(v) == FP_SUBNORMAL)
-    {
-        fpu.sw |= X87FPU::C3 | X87FPU::C2;
+    //is negative
+    if (std::signbit(v)) {
+        fpu.sw |= X87FPU::C1;
     }
-    else
+
+    //Classify based on value
+    if (std::isnan(v)) 
     {
-        fpu.sw |= X87FPU::C2;
+        fpu.sw |= X87FPU::C0; 
     }
+    else if (std::isinf(v)) 
+    {
+        fpu.sw |= X87FPU::C2; 
+    }
+    else if (v == 0.0L) 
+    {
+        fpu.sw |= X87FPU::C2;  
+    }
+    else if (std::fpclassify(v) == FP_SUBNORMAL) 
+    {
+        fpu.sw |= X87FPU::C3 | X87FPU::C2;  //Denormal
+    }
+    else 
+    {
+        fpu.sw |= X87FPU::C2; //normal
+    }
+}
+
+inline void X87_FDIVP(X87FPU& fpu)
+{
+    // FDIVP always: ST(1) = ST(1) / ST(0), then pop ST(0)
+    long double& st1 = fpu.st1();
+    long double& st0 = fpu.st0();
+
+    if (st0 == 0.0L) 
+    {
+        if (st1 == 0.0L) {
+            fpu.sw |= 0x01;  // IE flag - 0/0
+        }
+        else {
+            fpu.sw |= 0x04;  // ZE flag - non-zero/0
+        }
+  
+        st1 = std::numeric_limits<long double>::quiet_NaN();
+
+        // Update tag for ST(1) to "special" (tag=2)
+        int tag_pos = ((fpu.top + 1) & 7) * 2;
+        fpu.tw = (fpu.tw & ~(3 << tag_pos)) | (2 << tag_pos);
+    }
+    else 
+    {
+        long double result = st1 / st0;
+
+        // Check for overflow/underflow
+        if (std::fpclassify(result) == FP_SUBNORMAL) {
+            fpu.sw |= 0x10;  // UE flag - Underflow
+        }
+        else if (std::isinf(result)) {
+            fpu.sw |= 0x08;  // OE flag - Overflow
+        }
+
+        st1 = result;
+        fpu.set_precision_flag();
+    }
+
+    fpu.pop();
 }
 
 #endif // X86_CONTEXT_H_INCLUDED
