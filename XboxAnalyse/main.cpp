@@ -13,11 +13,30 @@
 #define SWITCH_BYTEOFFSET 2
 #define SWITCH_SHORTOFFSET 3
 
-ZydisRegister GetIndexRegister(const ZydisDecodedOperand& memOp)
+uint32_t GetIndexRegister(const ZydisDecodedOperand& memOp)
 {
-
     if (memOp.type == ZYDIS_OPERAND_TYPE_MEMORY)
-        return memOp.mem.index;
+    {
+        switch (memOp.mem.index)
+        {
+        case ZYDIS_REGISTER_EAX:
+            return 0;
+        case ZYDIS_REGISTER_EBX:
+            return 1;
+        case ZYDIS_REGISTER_ECX:
+            return 2;
+        case ZYDIS_REGISTER_EDX:
+            return 3;
+        case ZYDIS_REGISTER_ESI:
+            return 4;
+        case ZYDIS_REGISTER_EDI:
+            return 5;
+        case ZYDIS_REGISTER_EBP:
+            return 6;
+        case ZYDIS_REGISTER_ESP:
+            return 7;
+        }
+    }
 
     return (ZydisRegister)UINT8_MAX; //No register found
 }
@@ -101,6 +120,7 @@ bool IsIndirectTable(const uint8_t* data, size_t size)
 }
 
 
+
 void ReadTable(Image& image, SwitchTable& table)
 {
     uint32_t pOffset = 0;
@@ -144,22 +164,18 @@ void ReadTable(Image& image, SwitchTable& table)
             printf("No valid labels found at 0x%08X. Skipping...\n", pOffset);
             return;
         }
-        else
-        {
-            table.r -= ZYDIS_REGISTER_EAX; //zydis has its own enum values that don't match, so we substract the offset
-        }
 
-    
+
         // Determine the size of the jump table dynamically
-        const size_t jumpTableSize = DetermineJumpTableSize(offsets, 100, image.base, image.size); // Arbitrary 100 value for max size
-        if (jumpTableSize == 0) 
+        const size_t jumpTableSize = DetermineJumpTableSize(offsets, UINT8_MAX, image.base, image.size); // Arbitrary 255 value for max size
+        if (jumpTableSize == 0)
         {
             printf("No valid labels found at 0x%08X. Skipping...\n", pOffset);
             return;
         }
 
-        table.end = pOffset + (jumpTableSize * 4);
-        //Check if the data following the jump table is an indirect table
+        // table.end = pOffset + (jumpTableSize * 4);
+         //Check if the data following the jump table is an indirect table
         const uint8_t* indirectTableStart = (const uint8_t*)offsets + (jumpTableSize * 4);
         if (IsIndirectTable(indirectTableStart, 16)) // Check the next 16 bytes
         {
@@ -172,7 +188,7 @@ void ReadTable(Image& image, SwitchTable& table)
                 table.indirectTable.push_back(indirectTableStart[i]);
             }
 
-            table.end += indirectTableSize; //update end address to handle the indirect table which extend the original switch
+            //table.end += indirectTableSize; //update end address to handle the indirect table which extend the original switch
         }        //Check if the data following the jump table is alignment padding
         else if (IsAlignmentPadding((const uint8_t*)offsets + (table.r * 4), 4)) // Check the next 4 bytes
         {
@@ -190,116 +206,9 @@ void ReadTable(Image& image, SwitchTable& table)
     {
 
 
-       
+
     }
 }
-
-
-
-void ScanTable(const uint8_t* code, size_t base, SwitchTable& table) {
-    ZydisDecodedInstruction insn;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    ZydisDecoder decoder;
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
-
-    // Search for jump table metadata
-    for (int i = 0; i < 64; i++) { // Increased search range
-        if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, &code[-i], 16, &insn, operands))) 
-        {
-            // Look for a `jmp` instruction with a memory operand
-            if (insn.mnemonic == ZYDIS_MNEMONIC_JMP && insn.operand_count > 0 &&
-                operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                // Extract the base address of the jump table
-                table.base = base + (code - &code[-i]);
-
-                // Extract the default label (if any)
-                table.defaultLabel = operands[0].mem.disp.value;
-
-                // Look for a `cmp` or `sub` instruction to determine the size
-                for (int j = i + 1; j < i + 16; j++) { // Search nearby instructions
-                    if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, &code[-j], 16, &insn, operands))) {
-                        if (insn.mnemonic == ZYDIS_MNEMONIC_CMP && insn.operand_count > 1 &&
-                            operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                            table.r = operands[1].imm.value.u;
-                            printf("Found cmp instruction, jump table size = %u\n", table.r);
-                            break;
-                        }
-                        else if (insn.mnemonic == ZYDIS_MNEMONIC_SUB && insn.operand_count > 1 &&
-                            operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                            table.r = operands[1].imm.value.u;
-                            printf("Found sub instruction, jump table size = %u\n", table.r);
-                            break;
-                        }
-                    }
-                }
-
-                // Validate the jump table size
-                if (table.r > 0 && table.r < 1000) { // Arbitrary limit to avoid false positives
-                    table.labels.reserve(table.r + 1);
-                    break;
-                }
-                else {
-                    printf("Invalid jump table size: %u. Skipping...\n", table.r);
-                    return;
-                }
-            }
-        }
-    }
-}
-
-void OldScanTable(const uint8_t* code, size_t base, SwitchTable& table)
-{
-    ZydisDecodedInstruction insn;
-    ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
-    ZydisDecoder decoder;
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
-
-    // Find the jump table metadata
-    for (int i = 0; i < 32 * 2; i++)
-    {
-        // Decode the instruction at the current offset
-        if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, &code[-i], 16, &insn, operands)))
-        {
-            // Look for a `jmp` instruction (e.g., `jmp [eax*4 + offset]`)
-            if (insn.mnemonic == ZYDIS_MNEMONIC_JMP)
-            {
-                // Check if the operand is a memory reference (e.g., `[eax*4 + offset]`)
-                if (insn.operand_count > 0 && operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    // Extract the base address of the jump table
-                    table.base = base + (code - &code[-i]); // Calculate the base address
-
-                    table.defaultLabel = operands[0].mem.disp.value; // Default label (if any)
-
-                    // Try to determine the size of the jump table here
-                    // Look for a `cmp` instruction to determine the size of the jump table
-                    if (ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, &code[-i - 4], 16, &insn, operands)))
-                    {
-                        if (insn.mnemonic == ZYDIS_MNEMONIC_CMP && insn.operand_count > 1 && operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-                        {
-                            if (operands[1].imm.value.u < 1000) // Arbitrary limit to catch invalid
-                            {
-                                table.r = operands[1].imm.value.u;
-                                printf("Found cmp instruction, jump table size = %u (immediate value = 0x%08X)\n", table.r, operands[1].imm.value.u); // Debug print
-                            }
-                            else
-                            {
-                                printf("Invalid jump table size: %u. Skipping...\n", table.r);
-                                return;
-                            }
-                        }
-                    }
-
-                    // Resize the labels vector to hold the entries
-                    table.labels.reserve(table.r + 1);
-                    break;
-                }
-            }
-
-        }
-    }
-}
-
 
 
 void* SearchMask(const void* source, const uint8_t* compare, size_t compareCount, size_t size)
@@ -377,7 +286,7 @@ int main(int argc, char** argv)
             println("base = 0x{:X}", table.base);
             println("r = {}", table.r);
             println("default = 0x{:X}", table.defaultLabel);
-            println("end = 0x{:X}", table.end);
+            //println("end = 0x{:X}", table.end);
             println("labels = [");
             for (const auto& label : table.labels)
             {
@@ -385,15 +294,15 @@ int main(int argc, char** argv)
             }
 
             println("]");
-            if (table.indirectTable.empty() == false)
-            {
-                println("indirect = [");
-                for (const auto& label : table.indirectTable)
-                {
-                    println("    0x{:X},", label);
-                }
-                println("]");
-            }
+            /** if (table.indirectTable.empty() == false)
+             {
+                 println("indirect = [");
+                 for (const auto& label : table.indirectTable)
+                 {
+                     println("    0x{:X},", label);
+                 }
+                 println("]");
+             }*/
             println("");
         };
 
@@ -404,6 +313,10 @@ int main(int argc, char** argv)
 
     auto scanPattern = [&](uint8_t* pattern, size_t count, size_t type)
         {
+            ZydisDecoder decoder;
+            ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_COMPAT_32, ZYDIS_STACK_WIDTH_32);
+            ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+
             for (const auto& section : image.sections)
             {
                 if (!(section.flags & SectionFlags_Code))
@@ -411,31 +324,56 @@ int main(int argc, char** argv)
                     continue;
                 }
 
+
                 // println("# Section " + section.name + "\n");
                 size_t base = section.base;
                 uint8_t* data = section.data;
                 uint8_t* dataStart = section.data;
                 uint8_t* dataEnd = section.data + section.size;
+
                 while (data < dataEnd && data != nullptr)
                 {
-                    data = (uint8_t*)SearchMask(data, pattern, count, dataEnd - data);
+                    ZydisDecodedInstruction instruction;
+                    auto size = dataEnd - dataStart;
 
-                    if (data != nullptr)
+                    if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, data, dataEnd - data, &instruction, operands)))
                     {
+                        data++;
+                        continue;
+                    }
+
+                    const bool is_jump_table = instruction.mnemonic == ZYDIS_MNEMONIC_JMP &&
+                        operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                        operands[0].mem.index != ZYDIS_REGISTER_NONE &&
+                        (operands[0].mem.scale == 4 || operands[0].mem.scale == 8);
+
+                    auto addr = base + (data - section.data);
+                    if (addr == 0x14A92)
+                    {
+                        printf("\n");
+                    }
+
+                    if (is_jump_table)
+                    {
+
                         SwitchTable table{};
                         table.type = type;
-                        ScanTable((uint8_t*)data, base + (data - dataStart), table);
-
-                        if (table.base != 0)
+                        // Extract the base address of the jump table
+                        table.base = addr;
+                        table.defaultLabel = operands[0].mem.disp.value;
+        
+                        if (table.base > section.base)
                         {
                             ReadTable(image, table);
                             printTable(table);
                             switches.emplace_back(std::move(table));
                         }
 
-                        data += 4;
+
                     }
-                    continue;
+
+                    operands[0] = operands[0];
+                    data += instruction.length;
                 }
             }
         };
@@ -463,15 +401,11 @@ int main(int argc, char** argv)
     println("# ---- ABSOLUTE JUMPTABLE ----\n");
     scanPattern(absoluteSwitch, std::size(absoluteSwitch), SWITCH_ABSOLUTE);
 
-    println("# ---- COMPUTED JUMPTABLE ----\n");
-    scanPattern(computedSwitch, std::size(computedSwitch), SWITCH_COMPUTED);
-
-    println("# ---- OFFSETED JUMPTABLE ----\n");
-    scanPattern(offsetSwitch, std::size(offsetSwitch), SWITCH_BYTEOFFSET);
-    scanPattern(wordOffsetSwitch, std::size(wordOffsetSwitch), SWITCH_SHORTOFFSET);
 
     std::ofstream f(tomlPath);
     f.write(out.data(), out.size());
+
+    printf("found %ld jump tables\n", switches.size());
 
     return EXIT_SUCCESS;
 }
