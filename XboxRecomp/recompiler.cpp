@@ -739,6 +739,7 @@ void Recompiler::Analyse()
 
 
     // Process manual functions from config (if any)
+    // first we delete any duplicate if the tool found same function from config since they are likely incorrect.
     printf("Process manual functions from config...\n");
     for (auto& [address, size] : config.functions)
     {
@@ -746,16 +747,9 @@ void Recompiler::Analyse()
         {
             auto funcEnd = it->base + it->size;
 
-#ifdef _DEBUG
-            if (address == it->base && ((funcEnd == address + size) || (funcEnd == address + size - 1)))
-            {
-                printf("%x is fixed! FuncEnd from config %x, FuncEnd from existing functions %x\n", address, address + size, funcEnd);
-            }
-#endif
-
-
             if (address == it->base || (funcEnd > address && funcEnd <= address + size))
             {
+                printf("deleted 0x%x (duplicate)\n", it->base);
                 it = functions.erase(it);
             }
             else
@@ -763,7 +757,11 @@ void Recompiler::Analyse()
                 ++it;
             }
         }
+    }
 
+    //now we can add functions from config
+    for (auto& [address, size] : config.functions)
+    {
         functions.emplace_back(address, size);
     }
 
