@@ -887,7 +887,6 @@ struct X87FPU
         int current_tag = (tw >> tag_pos) & 3;
         if (current_tag != 3) {  // Register not empty (tag != 11)
             sw |= 0x41;
-            return;
         }
 
         st[top] = value;
@@ -958,6 +957,74 @@ struct X87FPU
             return st6();
         case 7:
             return st7();
+        }
+    }
+
+
+    void init()
+    {
+        cw = 0x37F;
+        tw = 0xFFFF;
+        sw = 0;
+    }
+
+    void save(uint32_t addr, uint8_t* base, bool is32bits)
+    {
+        if (is32bits)
+        {
+            X86_STORE_U16(addr, cw);
+            X86_STORE_U16(addr + 4, sw);
+            X86_STORE_U16(addr + 8, tw);
+
+            // Save registers in physical order (ST(0) is at position 'top')
+            for (int i = 0; i < 8; i++) 
+            {
+                // Convert long double to 80-bit extended precision
+                X86_STORE_F80(addr + 28 + i * 10, st[i]);
+            }
+        }
+        else
+        {
+            X86_STORE_U16(addr, cw);
+            X86_STORE_U16(addr + 2, sw);
+            X86_STORE_U16(addr + 4, tw);
+
+            // Save registers in physical order (ST(0) is at position 'top')
+            for (int i = 0; i < 8; i++)
+            {
+                // Convert long double to 80-bit extended precision
+                X86_STORE_F80(addr + 14 + i * 10, st[i]);
+            }
+        }
+    }
+
+    void load(uint32_t addr, uint8_t* base, bool is32bits)
+    {
+        if (is32bits)
+        {
+            cw = X86_LOAD_U16(addr);
+            sw = X86_LOAD_U16(addr + 4);
+            tw = X86_LOAD_U16(addr + 8);
+
+            // Save registers in physical order (ST(0) is at position 'top')
+            for (int i = 0; i < 8; i++) 
+            {
+                // Convert long double to 80-bit extended precision
+                st[i] = X86_LOAD_F80(addr + 28 + i * 10);
+            }
+        }
+        else
+        {
+            cw = X86_LOAD_U16(addr);
+            sw = X86_LOAD_U16(addr + 2);
+            tw = X86_LOAD_U16(addr + 4);
+
+            // Save registers in physical order (ST(0) is at position 'top')
+            for (int i = 0; i < 8; i++)
+            {
+                // Convert long double to 80-bit extended precision
+                st[i] = X86_LOAD_F80(addr + 14 + i * 10);
+            }
         }
     }
 
@@ -1095,7 +1162,7 @@ struct X87FPU
             sw |= X87FPU::C3;  // ST0 == rhs
         }
 
-        while (pops--) 
+        while (pops--)
             pop();
     }
 
@@ -1105,7 +1172,7 @@ struct X87FPU
         {
             eflags.value |= X86EFlags::ZF | X86EFlags::PF | X86EFlags::CF;
         }
-        else if (lhs > rhs) 
+        else if (lhs > rhs)
         {
             eflags.value &= ~(X86EFlags::ZF | X86EFlags::CF | X86EFlags::PF);
         }
@@ -1365,50 +1432,52 @@ inline void X87_FXAM(X87FPU& fpu, int32_t top)
     }
 
     //Classify based on value
-    if (std::isnan(v)) 
+    if (std::isnan(v))
     {
-        fpu.sw |= X87FPU::C0; 
+        fpu.sw |= X87FPU::C0;
     }
-    else if (std::isinf(v)) 
+    else if (std::isinf(v))
     {
-        fpu.sw |= X87FPU::C2; 
+        fpu.sw |= X87FPU::C2;
     }
-    else if (v == 0.0L) 
+    else if (v == 0.0L)
     {
-        fpu.sw |= X87FPU::C2;  
+        fpu.sw |= X87FPU::C2;
     }
-    else if (std::fpclassify(v) == FP_SUBNORMAL) 
+    else if (std::fpclassify(v) == FP_SUBNORMAL)
     {
         fpu.sw |= X87FPU::C3 | X87FPU::C2;  //Denormal
     }
-    else 
+    else
     {
         fpu.sw |= X87FPU::C2; //normal
     }
 }
 
-inline void X87_FDIVP(X87FPU& fpu)
+inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
 {
     // FDIVP always: ST(1) = ST(1) / ST(0), then pop ST(0)
     long double& st1 = fpu.st1();
     long double& st0 = fpu.st0();
 
-    if (st0 == 0.0L) 
+    if (st0 == 0.0L)
     {
+       // printf("WARNING, DIVIDE PER 0!!!\n%x", addr);
+
         if (st1 == 0.0L) {
             fpu.sw |= 0x01;  // IE flag - 0/0
         }
         else {
             fpu.sw |= 0x04;  // ZE flag - non-zero/0
         }
-  
+
         st1 = std::numeric_limits<long double>::quiet_NaN();
 
         // Update tag for ST(1) to "special" (tag=2)
         int tag_pos = ((fpu.top + 1) & 7) * 2;
         fpu.tw = (fpu.tw & ~(3 << tag_pos)) | (2 << tag_pos);
     }
-    else 
+    else
     {
         long double result = st1 / st0;
 
@@ -1417,6 +1486,7 @@ inline void X87_FDIVP(X87FPU& fpu)
             fpu.sw |= 0x10;  // UE flag - Underflow
         }
         else if (std::isinf(result)) {
+            printf("WARNING, INF NUMBER !!!\n%x", addr);
             fpu.sw |= 0x08;  // OE flag - Overflow
         }
 
@@ -1425,6 +1495,72 @@ inline void X87_FDIVP(X87FPU& fpu)
     }
 
     fpu.pop();
+}
+
+inline void X87_ISDIV_VALID(long double A, long double B, uint32_t addr)
+{
+    long double& st0 = A;
+    long double& st1 = B;
+
+
+    if (st0 == 0.0L || st1 == 0.0L)
+    {
+        //printf("WARNING, DIVIDE PER 0!!! (%Lf / %Lf) %x\n", A, B, addr);
+    }
+    else
+    {
+        long double result = st0 / st1;
+
+        // Check for overflow/underflow
+        if (std::isinf(result))
+        {
+            printf("WARNING, DIVISION RESULT IS INF!!! (%Lf / %Lf) %x\n", A, B, addr);
+        }
+
+        if (std::isnan(result))
+        {
+            printf("WARNING, DIVISION RESULT IS NAN!!! (%Lf / %Lf) %x\n", A, B, addr);
+        }
+    }
+}
+
+inline long double X87_FDIVR(long double res, long double A, long double B, uint32_t addr)
+{
+    X87_ISDIV_VALID(A, B, addr);
+
+    res = A / B;
+
+    return res;
+}
+
+inline long double X87_FDIVID_16(long double st0, int16_t B, uint32_t addr)
+{
+    if (st0 == 0.0L || B == 0)
+    {
+        //printf("WARNING, DIVIDE PER 0!!! (%Lf / %d) %x\n", st0, B, addr);
+    }
+
+    return (st0 / (long double)B);
+}
+
+inline long double X87_FDIVID_32(long double st0, int32_t B, uint32_t addr)
+{
+    if (st0 == 0.0L || B == 0)
+    {
+        //printf("WARNING, DIVIDE PER 0!!! (%Lf / %d) %x\n", st0, B, addr);
+    }
+
+    return (st0 / (long double)B);
+}
+
+inline long double X87_FDIVID_REG(long double st0, long double B, uint32_t addr)
+{
+    if (st0 == 0.0L || B == 0)
+    {
+        //printf("WARNING, DIVIDE PER 0!!! (%Lf / %d) %x\n", st0, B, addr);
+    }
+
+    return (st0 / B);
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

@@ -1410,7 +1410,7 @@ bool Recompiler::Recompile(
 
 
 
-    auto printFunctionCallAddr = [&](uint32_t address)
+    auto printFunctionCallAddr = [&](uint32_t address, bool needSpace = false)
         {
 
             auto targetSymbol = image.symbols.find(address & 0xFFFFFFFF);
@@ -1423,7 +1423,10 @@ bool Recompiler::Recompile(
                 }
                 else {
                     // Call the function directly
-                    println("\t{}(ctx, base);", targetSymbol->name);
+                    if (needSpace)
+                        println("\t\t{}(ctx, base);", targetSymbol->name);
+                    else
+                        println("\t{}(ctx, base);", targetSymbol->name);
                     return 1;
                 }
             }
@@ -1465,8 +1468,8 @@ bool Recompiler::Recompile(
             {
                 // External function call
                 println("\tif ({}{}) {{", not_ ? "!" : "", cond);
-                printFunctionCallAddr(targetAddress);
-                println("\treturn;");
+                printFunctionCallAddr(targetAddress, true);
+                println("\t\treturn;");
                 println("\t}}");
             }
             else
@@ -1591,7 +1594,7 @@ bool Recompiler::Recompile(
                     }
                     else
                     {
-                        println("\t\tprintf(\"FPU_EXCEPTION FLOATOPERATIONS FUNCTION {}\\n\");", base);
+                        println("\t\tprintf(\"FPU_EXCEPTION FLOATOPERATIONS FUNCTION {:X}\\n\");", base);
                     }
                 }
 
@@ -1607,7 +1610,7 @@ bool Recompiler::Recompile(
             {
                 println("\tif (!std::isfinite(valDouble0) && valDouble0 == ctx.fpu.st0() {} 0.0) {{", sign);
                 println("\t\tctx.fpu.flag_divzero();");
-                println("\t\tprintf(\"FLOATOPERATIONS ZERO DIVIDE {}\\n\");", base);
+                println("\t\tprintf(\"FLOATOPERATIONS ZERO DIVIDE {:X}\\n\");", base);
                 println("\t}}");
             }
         };
@@ -2658,6 +2661,31 @@ bool Recompiler::Recompile(
             println("\tctx.handle_sse_exceptions();");
         }
         break;
+
+    case ZYDIS_MNEMONIC_CMOVNL:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+
+            //CMOVGE: Move if SF == OF
+            println("\tif (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0)) {{");
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                println("\t\t{} = {};", get_x86_reg(dst.reg.value),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                println("\t\tX86_STORE_{}({}, {});", GetOperandSizeName(dst.size), ea(dst),
+                    src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                    get_x86_reg(src.reg.value) :
+                    fmt::format("X86_LOAD_U{}({})", GetOperandSizeName(dst.size), ea(src)));
+            }
+            println("\t}}");
+        }
+        break;
     case ZYDIS_MNEMONIC_CMOVZ:
         if (insn.insn.operand_count >= 2)
         {
@@ -3037,6 +3065,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FABS:
         println("\tctx.fpu.st0() = fabs(ctx.fpu.st0());");
+        println("\tctx.fpu.sw &= ~X87FPU::C1;");
         break;
     case ZYDIS_MNEMONIC_FCOS:
         println("\tvalDouble0 = ctx.fpu.st0();");
@@ -3455,7 +3484,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FDIVP:
     {
-        println("\tX87_FDIVP(ctx.fpu);");
+        println("\tX87_FDIVP(ctx.fpu, 0x{:X});", base);
     }
     break;
     case ZYDIS_MNEMONIC_FIDIV:
@@ -3467,34 +3496,19 @@ bool Recompiler::Recompile(
             {
                 switch (src.size) {
                 case 16:
-                    println("\tint16_t divisor_{} = (int16_t)X86_LOAD_U16({});", base, ea(src));
-                    println("\tif (divisor_{} == 0) {{", base);
-                    println("\t\tprintf(\"FPU_EXCEPTION_ZERODIVIDE\\n\");");
-                    println("\t}} else {{");
-                    println("\t\tctx.fpu.st0() /= (long double)divisor_{};", base);
-                    println("\t}}");
+                    println("\tctx.fpu.st0() = (long double)X87_FDIVID_16(ctx.fpu.st0(), {}, 0x{:X});", ea(src), base);
                     break;
                 case 32:
-                    println("\tint32_t divisor_{} = (int32_t)X86_LOAD_U32({});", base, ea(src));
-                    println("\tif (divisor_{} == 0) {{", base);
-                    println("\t\tprintf(\"FPU_EXCEPTION_ZERODIVIDE\\n\");");
-                    println("\t}} else {{");
-                    println("\t\tctx.fpu.st0() /= (long double)divisor_{};", base);
-                    println("\t}}");
+                    println("\tctx.fpu.st0() = (long double)X87_FDIVID_32(ctx.fpu.st0(), {}, 0x{:X});", ea(src), base);
                     break;
                 default:
                     println("\tctx.fpu.signal_exception(FPU_EXCEPTION_INVALID);");
                     println("\tassert(false && \"Invalid operand size for FIDIV\");");
                 }
             }
-            else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                // Register operand for FIDIV - convert to double and check for zero
-                println("\tlong double divisor_{} = (long double){};", base, get_x86_reg(src.reg.value));
-                println("\tif (divisor_{} == 0.0) {{", base);
-                println("\t\tprintf(\"FPU_EXCEPTION_ZERODIVIDE\\n\");");
-                println("\t}} else {{");
-                println("\t\tctx.fpu.st0() /= divisor_{};", base);
-                println("\t}}");
+            else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\tctx.fpu.st0() = (long double)X87_FDIVID_REG(ctx.fpu.st0(), (long double){}, 0x{:X});", get_x86_reg(src.reg.value), base);
             }
 
         }
@@ -3502,6 +3516,9 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
         break;
     case ZYDIS_MNEMONIC_FDIVR:
+    case ZYDIS_MNEMONIC_FDIVRP:
+    {
+        const bool isPopVersion = insn.insn.mnemonic == ZYDIS_MNEMONIC_FDIVRP;
         if (insn.insn.operand_count == 3)
         {
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -3513,15 +3530,19 @@ bool Recompiler::Recompile(
             {
                 int st_dest = insn.operands[0].reg.value - ZYDIS_REGISTER_ST0;
                 int st_src = insn.operands[1].reg.value - ZYDIS_REGISTER_ST0;
-                println("\tctx.fpu.st{}() = ctx.fpu.st{}() / ctx.fpu.st{}();", st_dest, st_src, st_dest);
+
+                println("\tctx.fpu.st{}() = X87_FDIVR(ctx.fpu.st{}(), ctx.fpu.st{}(), ctx.fpu.st{}(), 0x{:X});", st_dest, st_dest, st_src, st_dest, base);
+
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                if (insn.operands[0].size == 32) {
-                    println("\tctx.fpu.st0() = X86_LOAD_F32({}) / ctx.fpu.st0();", ea(insn.operands[0]));
+                if (insn.operands[0].size == 32)
+                {
+                    // println("\t\tctx.fpu.st0() = X86_LOAD_F32({}) / ctx.fpu.st0();", ea(insn.operands[0]));
+                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), X86_LOAD_F32({}), ctx.fpu.st0(), 0x{:X});", ea(insn.operands[0]), base);
                 }
                 else if (insn.operands[0].size == 64) {
-                    println("\tctx.fpu.st0() = X86_LOAD_F64({}) / ctx.fpu.st0();", ea(insn.operands[0]));
+                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), X86_LOAD_F64({}), ctx.fpu.st0(), 0x{:X});", ea(insn.operands[0]), base);
                 }
                 else {
                     println("// ERROR: Unsupported FDIVR memory operand size");
@@ -3538,17 +3559,19 @@ bool Recompiler::Recompile(
                 insn.operands[1].reg.value == ZYDIS_REGISTER_ST0)
             {
                 int st_idx = insn.operands[0].reg.value - ZYDIS_REGISTER_ST0;
-                println("\tctx.fpu.st{}() = ctx.fpu.st0() / ctx.fpu.st{}();", st_idx, st_idx);
+                println("\tctx.fpu.st{}() = X87_FDIVR(ctx.fpu.st{}(), ctx.fpu.st0(), ctx.fpu.st{}(), 0x{:X});", st_idx, st_idx, st_idx, base);
             }
             // Case 2: FDIVR m32/m64 → ST(0) = [mem] / ST(0)
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
                 std::string memAddr = decode_memory_operand(insn.operands[0].mem);
-                if (insn.operands[0].size == 32) {
-                    println("\tctx.fpu.st0() = *(float*){} / ctx.fpu.st0();", memAddr);
+                if (insn.operands[0].size == 32)
+                {
+                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), *(float*){}, ctx.fpu.st0(), 0x{:X});", memAddr, base);
                 }
-                else { // 64-bit double
-                    println("\tctx.fpu.st0() = *(long double*){} / ctx.fpu.st0();", memAddr);
+                else  // 64-bit double
+                {
+                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), *(long double*){}, ctx.fpu.st0(), 0x{:X});", memAddr, base);
                 }
             }
             else
@@ -3556,9 +3579,17 @@ bool Recompiler::Recompile(
                 println("// ERROR: Unsupported FDIVR operand combination");
             }
         }
-        break;
+
+        if (isPopVersion)
+        {
+            println("\tctx.fpu.pop();");
+        }
+        println("\tctx.fpu.sw &= ~X87FPU::C1;");
+    }
+    break;
     case ZYDIS_MNEMONIC_FCHS:
         println("\tctx.fpu.st0() = -ctx.fpu.st0();");
+        println("\tctx.fpu.sw &= ~X87FPU::C1;");
         break;
     case ZYDIS_MNEMONIC_FCOM:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -3632,8 +3663,45 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_FFREE:
     {
-        println("\tctx.fpu.ffree(ctx.fpu.st{}());", get_st_index(insn.operands[0].reg.value));
+        println("\tctx.fpu.ffree({});", get_st_index(insn.operands[0].reg.value));
     }
+    break;
+    case ZYDIS_MNEMONIC_FNSAVE: //note, some instruction like "9B DD 71 08" will show as "fsave" on ida, but zydis detect these as fwait + fsave.
+    {
+        std::string memAddr = decode_memory_operand_NoParentheses(insn.operands[0].mem);
+    
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) 
+        {
+            if (insn.operands[0].size == 864) //32 bits
+            {
+                println("\tctx.fpu.save({}, base, true);", memAddr);
+            }
+            else
+            {
+                println("\tctx.fpu.save({}, base, false);", memAddr);
+            }
+
+            println("\tctx.fpu.init();");
+        }
+    }
+    break;
+    case ZYDIS_MNEMONIC_FRSTOR:
+    {
+        std::string memAddr = decode_memory_operand_NoParentheses(insn.operands[0].mem);
+
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
+        {
+            if (insn.operands[0].size == 864) //32 bits
+            {
+                println("\tctx.fpu.load({}, base, true);", memAddr);
+            }
+            else
+            {
+                println("\tctx.fpu.load({}, base, false);", memAddr);
+            }
+        }
+    }
+
     break;
     case ZYDIS_MNEMONIC_FISTP:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -3658,6 +3726,7 @@ bool Recompiler::Recompile(
             println("\tctx.fpu.pop();");
         }
         break;
+
     case ZYDIS_MNEMONIC_FXCH:
         if (insn.insn.operand_count == 0)
         {
