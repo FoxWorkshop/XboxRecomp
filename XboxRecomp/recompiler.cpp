@@ -1761,7 +1761,7 @@ bool Recompiler::Recompile(
                     out += "ctx.eflags";
                     break;
                 case 'r':
-                    out += GetJmpTableRegister(std::atoi(reg.c_str() + 1));
+                    out += GetJmpTableRegister(std::atoi(reg.c_str()));
                     break;
                 }
             }
@@ -3669,8 +3669,8 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FNSAVE: //note, some instruction like "9B DD 71 08" will show as "fsave" on ida, but zydis detect these as fwait + fsave.
     {
         std::string memAddr = decode_memory_operand_NoParentheses(insn.operands[0].mem);
-    
-        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) 
+
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
             if (insn.operands[0].size == 864) //32 bits
             {
@@ -6417,6 +6417,21 @@ bool Recompiler::Recompile(
     return true;
 }
 
+std::string GetAsmHookRegister(size_t index)
+{
+    static constexpr std::array<const char*, 8> reg_names =
+    {
+        "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"
+    };
+
+    if (index >= reg_names.size())
+    {
+        throw std::runtime_error("Invalid x86 register index");
+    }
+
+    return fmt::format("X86Register & {}", reg_names[index]);
+};
+
 std::unordered_set<std::string> instMissing;
 std::unordered_map<size_t, size_t> wrongAnalyse;
 
@@ -6500,7 +6515,9 @@ bool Recompiler::Recompile(const Function& fn)
             {
                 if (out.back() != '(')
                     out += ", ";
-                print("uint32_t& {}", reg); // Map x86 registers to uint32_t
+
+                auto s = GetAsmHookRegister(std::atoi(reg.c_str()));
+                print("{}", s);
             }
             println(");\n");
 

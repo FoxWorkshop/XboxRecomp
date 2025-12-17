@@ -74,7 +74,6 @@ void RecompilerConfig::Load(const std::string_view& configFilePath)
                     switchTable.r = *table["r"].value<uint32_t>();
                     switchTable.base = *table["base"].value<size_t>();
                     switchTable.start = *table["default"].value<size_t>();
-                    //switchTable.end = *table["end"].value<size_t>();
 
 
                     for (auto& label : *table["labels"].as_array())
