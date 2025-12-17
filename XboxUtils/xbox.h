@@ -3,7 +3,7 @@
 #include <string>
 
 #ifdef _WIN32
-    #include <windows.h>
+#include <windows.h>
 #endif
 
 extern "C" void* MmGetHostAddress(uint32_t ptr);
@@ -68,9 +68,17 @@ using hresult_xt = long_xt;
 using ntstatus_xt = long_xt;
 using float_xt = float;
 
+template<typename T>
+struct FuncPtr32 {
+    uint32_t value;
+    T get() const { return reinterpret_cast<T>(uintptr_t(value)); }
+    void set(T func) { value = uint32_t(uintptr_t(func)); }
+};
+
+struct _KDPC;
 typedef void_xt(*PKDEFERRED_ROUTINE)
 (
-    IN struct _KDPC* Dpc,
+    _KDPC* Dpc,
     IN PVOID         DeferredContext,
     IN PVOID         SystemArgument1,
     IN PVOID         SystemArgument2
@@ -95,11 +103,13 @@ typedef struct _KDPC
         boolean_xt         Inserted;           // 0x02
     };
     uchar_xt               Importance;         // 0x03
-    LIST_ENTRY          DpcListEntry;       // 0x04
-    PKDEFERRED_ROUTINE  DeferredRoutine;    // 0x0C
-    PVOID               DeferredContext;
-    PVOID               SystemArgument1;
-    PVOID               SystemArgument2;
+    //  LIST_ENTRY          DpcListEntry;       // 0x04
+    XLIST_ENTRY DpcListEntry;
+
+    FuncPtr32<PKDEFERRED_ROUTINE> DeferredRoutine;   // 0x0C
+    xpointer<uint32_t>     DeferredContext;
+    xpointer<uint32_t>  SystemArgument1;
+    xpointer<uint32_t>  SystemArgument2;
 }
 KDPC, * PKDPC;
 
