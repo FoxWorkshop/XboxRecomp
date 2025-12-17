@@ -37,6 +37,23 @@ struct xpointer
     explicit operator bool() const { return ptr != 0; }
 };
 
+struct xaddr32
+{
+    uint32_t v;
+
+    constexpr xaddr32() : v(0) {}
+    constexpr xaddr32(uint32_t val) : v(val) {}
+
+    template<typename T>
+    T* as() const
+    {
+        return v ? reinterpret_cast<T*>(MmGetHostAddress(v)) : nullptr;
+    }
+
+    explicit operator bool() const { return v != 0; }
+};
+static_assert(sizeof(xaddr32) == 4);
+
 
 using void_xt = void;
 using char_xt = char;
@@ -68,17 +85,9 @@ using hresult_xt = long_xt;
 using ntstatus_xt = long_xt;
 using float_xt = float;
 
-template<typename T>
-struct FuncPtr32 {
-    uint32_t value;
-    T get() const { return reinterpret_cast<T>(uintptr_t(value)); }
-    void set(T func) { value = uint32_t(uintptr_t(func)); }
-};
-
-struct _KDPC;
 typedef void_xt(*PKDEFERRED_ROUTINE)
 (
-    _KDPC* Dpc,
+    IN struct _KDPC* Dpc,
     IN PVOID         DeferredContext,
     IN PVOID         SystemArgument1,
     IN PVOID         SystemArgument2
@@ -103,13 +112,11 @@ typedef struct _KDPC
         boolean_xt         Inserted;           // 0x02
     };
     uchar_xt               Importance;         // 0x03
-    //  LIST_ENTRY          DpcListEntry;       // 0x04
-    XLIST_ENTRY DpcListEntry;
-
-    FuncPtr32<PKDEFERRED_ROUTINE> DeferredRoutine;   // 0x0C
-    xpointer<uint32_t>     DeferredContext;
-    xpointer<uint32_t>  SystemArgument1;
-    xpointer<uint32_t>  SystemArgument2;
+    XLIST_ENTRY          DpcListEntry;       // 0x04
+    xaddr32  DeferredRoutine;    // 0x0C
+    xaddr32               DeferredContext;
+    xaddr32               SystemArgument1;
+    xaddr32               SystemArgument2;
 }
 KDPC, * PKDPC;
 
