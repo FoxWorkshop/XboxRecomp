@@ -161,6 +161,21 @@ Image XbeLoadImage(const uint8_t* data, size_t size)
     printf("Section Headers Address: 0x%08X\n", header->sectionHeadersAddress);
     printf("Expected Section Headers Offset: 0x%08X\n", header->sectionHeadersAddress - header->baseAddress);
 
+    if (header->m_library_versions_addr != 0)
+    {
+        printf("Library Version %d\n", header->m_library_versions);
+
+        const uint32_t sectionLibOffset = header->m_library_versions_addr - header->baseAddress;
+
+        const auto* sectionLib = reinterpret_cast<const LibraryVersion*>(data + sectionLibOffset);
+
+        if (sectionLib)
+        {
+            printf("Build Version %d\n", sectionLib->wBuildVersion);
+            image.d3d8_version = sectionLib->wBuildVersion;
+        }
+    }
+
 
     const auto* sectionHeaders = reinterpret_cast<const XbeSectionHeader*>(data + sectionHeadersOffset);
 

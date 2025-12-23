@@ -13,6 +13,7 @@ struct Image
 
     size_t entry_point{};
     size_t dwsizeofImage{};
+    uint32_t d3d8_version{};
     std::set<Section, SectionComparer> sections{};
     SymbolTable symbols{};
 
@@ -51,3 +52,4 @@ Image ElfLoadImage(const uint8_t* data, size_t size);
 void LoadKernelFunctions(Image& image);
 uint32_t ResolveKernelCall(const uint32_t callAddr);
 uint32_t decode_entry_point(const uint32_t encoded_addr, const uint32_t maxSize);
+bool isXboxSignatureArray(int32_t address);

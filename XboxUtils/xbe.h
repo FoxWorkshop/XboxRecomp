@@ -1,5 +1,25 @@
 // XBE Header (based on https://xboxdevwiki.net/XBE and https://xbdev.net/fileformats/xbe/NonOfficialXBEFileFormat.pdf)
 #pragma pack(push, 1)
+struct LibraryVersion
+{
+    char   szName[8];                     // library name
+    uint16_t wMajorVersion;               // major version
+    uint16_t wMinorVersion;               // minor version
+    uint16_t wBuildVersion;               // build version
+
+    typedef struct
+    {
+        uint16_t QFEVersion : 13;   // QFE Version
+        uint16_t Approved : 2;    // Approved? (0:no, 1:possibly, 2:yes)
+        uint16_t bDebugBuild : 1;    // Is this a debug build?
+    } Flags;
+
+    union {
+        Flags wFlags;
+        uint16_t wFlags_value;
+    };
+};
+
 struct XbeHeader {
     char magic[4];              // "XBEH"
     uint8_t  digitalSignature[256]; // Digital signature

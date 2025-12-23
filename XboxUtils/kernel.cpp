@@ -11,6 +11,13 @@
 #define XE_EXPORT(MODULE, ORDINAL, NAME, TYPE) { (ORDINAL), "__imp__" STRINGIFY(NAME) }
 
 
+int32_t XboxSignatureAddress = -1;
+
+bool isXboxSignatureArray(int32_t address)
+{
+    return XboxSignatureAddress != -1 && XboxSignatureAddress == address;
+}
+
 std::unordered_map<size_t, size_t> kernelAddrMap;
 
 uint32_t ResolveKernelCall(const uint32_t callAddr)
@@ -126,9 +133,19 @@ void LoadKernelFunctions(Image& image)
                     kernelAddrMap.insert({ currentAddr, ordinal });
                     image.symbols.insert({ name->second, (currentAddr), 1, Symbol_Function });
                 }
+
+     
             }
+
+            if (index == 0x145) //xbox signature address
+            {
+                XboxSignatureAddress = currentAddr;
+            }       
 
             count++;
         };
     }
+
+    if (XboxSignatureAddress == -1)
+        printf("WARNING XBOX SIGNATURE NOT FOUND!\n");
 }

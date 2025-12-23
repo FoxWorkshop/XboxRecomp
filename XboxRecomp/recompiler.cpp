@@ -1120,16 +1120,35 @@ inline std::string GetNV2AArray(uint32_t addr, const int size)
     switch (size)
     {
     case 8:
-        string = "g_nv2a[" + offsetString + "]";
+        string = "g_nv2aPtr[" + offsetString + "]";
         break;
     case 16:
-        string = "*(uint16_t*)&" + (std::string)"g_nv2a[" + offsetString + "]";
+        string = "*(uint16_t*)&" + (std::string)"g_nv2aPtr[" + offsetString + "]";
         break;
     case 32:
-        string = "*(uint32_t*)&" + (std::string)"g_nv2a[" + offsetString + "]";
+        string = "*(uint32_t*)&" + (std::string)"g_nv2aPtr[" + offsetString + "]";
     }
 
     return string;
+}
+
+inline std::string GetXboxSignatureArray(const ZydisDecodedOperand op, const int size)
+{
+    int index = 0;
+    std::string reg = "";
+
+    if (op.mem.index != 0)
+    {
+        reg = "ctx." + (std::string)ZydisRegisterGetString(op.mem.index) + ".u" + std::to_string(size);
+    }
+
+    std::string offsetString = op.mem.index != 0 ? reg : std::to_string(index);
+  
+
+
+   std::string s = "XboxSignatureKey[" + offsetString + "]";
+
+    return s;
 }
 
 
@@ -1698,32 +1717,54 @@ bool Recompiler::Recompile(
                 return imm & 0xFFFFFFFF; // Default 32-bit
                 };
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+   
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+
+
                 std::string temp_res = get_temp_reg(dst.size);
                 println("\tauto {} = X86_LOAD_{}({});", temp_res, size_suffix, ea(dst));
 
                 if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     println("\t{} {} {:#x};", temp_res, op, mask_imm(src.imm.value.u));
                 }
-                else {
+                else
+                {
                     println("\t{} {} {};", temp_res, op, format_operand(src, size_suffix));
                 }
 
                 println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
                 println("\tctx.eflags.{}({});", flag_updater, temp_res);
             }
-            else {
-                if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            else
+            {
+                if (src.mem.segment == ZYDIS_REGISTER_DS) //read
+                {
+                    uint32_t offset = (uint32_t)src.mem.disp.value;
+  
+
+                    if (isXboxSignatureArray(offset))
+                    {
+                        println("\t{} {} {};", format_operand(dst, size_suffix), op, GetXboxSignatureArray(src, src.size));
+                    }
+                    else
+                    {
+                        println("\t{} {} {};", format_operand(dst, size_suffix), op, format_operand(src, size_suffix));
+                    }
+                }
+                else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     println("\t{} {} {:#x};",
                         format_operand(dst, size_suffix),
                         op,
                         mask_imm(src.imm.value.u));
                 }
                 else {
-                    println("\t{} {} {};",
-                        format_operand(dst, size_suffix),
+                    println("\t{} {} {};", format_operand(dst, size_suffix),
                         op,
                         format_operand(src, size_suffix));
+
+
                 }
                 println("\tctx.eflags.{}({});", flag_updater, format_operand(dst, size_suffix));
             }
@@ -1992,6 +2033,7 @@ bool Recompiler::Recompile(
                 }
             }
 
+
             //FS is Xbox kernel stuff
             //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
@@ -2059,6 +2101,10 @@ bool Recompiler::Recompile(
                     println("\t{} = {};  //Read DS Hardware variable", get_x86_reg(dst.reg.value), GetNV2AArray(offset, src.size));
                     break;
                 }
+                else if (isXboxSignatureArray(offset))
+                {
+                    println("\t{} = {};  //Read Signature array", get_x86_reg(dst.reg.value), GetXboxSignatureArray(src, src.size));
+                }
 
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_DS) //write
@@ -2078,6 +2124,10 @@ bool Recompiler::Recompile(
                 {
                     println("\t//skip write in physical memory");
                     break;
+                }
+                else if (isXboxSignatureArray(offset))
+                {
+                    println("\t{} = {};  //Write in Signature array", GetXboxSignatureArray(dst, dst.size), get_x86_reg(src.reg.value));
                 }
             }
 
@@ -6735,6 +6785,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
 
         println("#define X86_IMAGE_BASE 0x{:X}ull", image.base);
         println("#define X86_IMAGE_SIZE 0x{:X}ull", image.dwsizeofImage);
+        println("#define X86_CODE_D3D8V {}ull", image.d3d8_version);
 
         // Extract the address of the minimum code segment to store the function table at.
         size_t codeMin = ~0;

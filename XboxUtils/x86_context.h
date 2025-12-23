@@ -122,7 +122,8 @@
 
 
 extern uint8_t g_mmio[];
-extern uint8_t g_nv2a[];
+extern uint8_t* g_nv2aPtr;
+extern uint32_t XboxSignatureKey[];
 
 typedef void X86Func(struct X86Context& __restrict__ ctx, uint8_t* base);
 
