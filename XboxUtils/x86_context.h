@@ -309,7 +309,7 @@ struct X86EFlags
         clear_eflags();
 
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 31) & SF;
+        value |= (result & 0x80000000) ? SF : 0;
 
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
@@ -320,7 +320,7 @@ struct X86EFlags
         clear_eflags();
         value |= ((result < lhs) || (result == lhs && carry == 1)) ? CF : 0;
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 31) & SF;
+        value |= (result & 0x80000000) ? SF : 0;
         value |= ((((lhs ^ result) & (rhs ^ result)) >> 31) != 0) ? OF : 0;
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
@@ -334,7 +334,7 @@ struct X86EFlags
         value |= (result == 0) ? ZF : 0;
 
 
-        value |= (result >> 31) & SF;
+        value |= (result & 0x80000000) ? SF : 0;
 
         // Overflow Flag: Set if signed overflow occurs (same sign inputs, different sign output)
         value |= ((((lhs ^ result) & (rhs ^ result)) >> 31) != 0) ? OF : 0;
@@ -406,7 +406,7 @@ struct X86EFlags
         if (rhs == 0)
         {
             value |= (result == 0) ? ZF : 0;
-            value |= (result >> 31) & SF;
+            value |= (result & 0x80000000) ? SF : 0; 
             uint8_t lsb = result & 0xFF;
             value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
             return;  // Skip CF/OF/AF for this case!
@@ -415,7 +415,7 @@ struct X86EFlags
         // For unsigned comparison, CF is set if rhs > lhs (borrow needed)
         value |= (lhs < rhs) ? CF : 0;
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 31) & SF;
+        value |= (result & 0x80000000) ? SF : 0;
         value |= ((((lhs ^ rhs) & (lhs ^ result)) >> 31) != 0) ? OF : 0;
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
@@ -492,7 +492,7 @@ struct X86EFlags
         clear_eflags();
         value |= saved_cf;
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 31) & SF;
+        value |= (result & 0x80000000) ? SF : 0;
         // Overflow Flag (only if 0x7FFFFFFF -> 0x80000000)
         value |= (old_val == 0x7FFFFFFF) ? OF : 0;
         uint8_t lsb = result & 0xFF;
@@ -507,7 +507,7 @@ struct X86EFlags
         clear_eflags();
         value |= saved_cf;
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 15) ? SF : 0;  // Sign flag for 16-bit (bit 15)
+        value |= (result & 0x8000) ? SF : 0;
         // Overflow Flag (only if 0x7FFF -> 0x8000)
         value |= (old_val == 0x7FFF) ? OF : 0;
         uint8_t lsb = result & 0xFF;
@@ -522,7 +522,7 @@ struct X86EFlags
         clear_eflags();
         value |= saved_cf;
         value |= (result == 0) ? ZF : 0;
-        value |= (result >> 7) ? SF : 0;  // Sign flag for 8-bit (bit 7)
+        value |= (result & 0x80) ? SF : 0;  // Sign flag for 8-bit (bit 7)
         // Overflow Flag (only if 0x7F -> 0x80)
         value |= (old_val == 0x7F) ? OF : 0;
         value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
