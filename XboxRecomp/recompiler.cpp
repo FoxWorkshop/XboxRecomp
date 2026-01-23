@@ -551,6 +551,11 @@ void Recompiler::Analyse()
                     target_address = headerSectionBase + (headerSectionData - section.data) + instruction.length + imm;
                     size_t instAddr = headerSectionBase + (headerSectionData - section.data);
 
+                    if (target_address == 0x1FE00)
+                    {
+                        printf("");
+                    }
+
                     if (duplicateCheck.count(target_address))
                     {
                         headerSectionData += instruction.length;
@@ -746,10 +751,9 @@ void Recompiler::Analyse()
         for (auto it = functions.begin(); it != functions.end(); )
         {
             auto funcEnd = it->base + it->size;
-
-            if (address == it->base || (funcEnd > address && funcEnd <= address + size))
+            bool broken = (funcEnd > address && funcEnd < address + size); //diabled for now
+            if (address == it->base)
             {
-                printf("deleted 0x%x (duplicate)\n", it->base);
                 it = functions.erase(it);
             }
             else
@@ -6494,6 +6498,10 @@ bool Recompiler::Recompile(const Function& fn)
     static std::unordered_set<size_t> labels;
     labels.clear();
 
+    if (base == 0x1FE00)
+    {
+        printf("");
+    }
 
     RecompilerFuncConfig funcConfig;
     RecompilerLocalVariables localvariablesTemp;
