@@ -17,7 +17,7 @@ int main(int argc, char* argv[])
     if (argc < 3)
     {
         tomlPath = "..\\..\\..\\..\\..\\..\\ShadowRecompLib\\config\\recompConfig.toml";
-        x86Context = "..\\..\\..\\..\\..\\.\\tools\\XboxRecomp\\XboxUtils\\x86_context.h";
+        x86Context = "..\\..\\..\\..\\..\\..\\tools\\XboxRecomp\\XboxUtils\\x86_context.h";
     }
     else
     {
