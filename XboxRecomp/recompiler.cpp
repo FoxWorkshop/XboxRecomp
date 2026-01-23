@@ -6933,9 +6933,9 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
         // Check if an identical file already exists first to not trigger recompilation
         std::string directoryPath = config.directoryPath;
         if (!directoryPath.empty())
-            directoryPath += "/";
+            directoryPath += "\\";
 
-        std::string filePath = fmt::format("{}{}/{}", directoryPath, config.outDirectoryPath, name.empty() ? cppName : name);
+        std::string filePath = fmt::format("{}{}\\{}", directoryPath, config.outDirectoryPath, name.empty() ? cppName : name);
         FILE* f = fopen(filePath.c_str(), "rb");
         if (f)
         {
@@ -6956,9 +6956,18 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
 
         if (shouldWrite)
         {
+            // TODO: Probably should just destroy output x86 folder completely each run of this, so never have old files
+            std::filesystem::path p(filePath);
+            std::filesystem::create_directories(p.parent_path());
+
             f = fopen(filePath.c_str(), "wb");
-            fwrite(out.data(), 1, out.size(), f);
-            fclose(f);
+            if (f) {
+                fwrite(out.data(), 1, out.size(), f);
+                fclose(f);
+            }
+            else {
+                printf("\nWARNING: Unable to write files!!!\n");
+            }
         }
 
         out.clear();

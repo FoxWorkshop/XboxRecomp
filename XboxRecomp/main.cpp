@@ -16,8 +16,8 @@ int main(int argc, char* argv[])
 #ifdef _DEBUG
     if (argc < 3)
     {
-        tomlPath = "recompConfig.toml";
-        x86Context = "x86_context.h"; 
+        tomlPath = "..\\..\\..\\..\\..\\..\\ShadowRecompLib\\config\\recompConfig.toml";
+        x86Context = "..\\..\\..\\..\\XboxUtils\\x86_context.h";
     }
     else
     {
