@@ -751,9 +751,10 @@ void Recompiler::Analyse()
         for (auto it = functions.begin(); it != functions.end(); )
         {
             auto funcEnd = it->base + it->size;
-            bool broken = (funcEnd > address && funcEnd < address + size); //diabled for now
-            if (address == it->base)
+
+            if (address == it->base || (funcEnd > address && funcEnd < address + size))
             {
+                printf("deleted 0x%x (duplicate)\n", it->base);
                 it = functions.erase(it);
             }
             else
@@ -6497,11 +6498,6 @@ bool Recompiler::Recompile(const Function& fn)
 
     static std::unordered_set<size_t> labels;
     labels.clear();
-
-    if (base == 0x1FE00)
-    {
-        printf("");
-    }
 
     RecompilerFuncConfig funcConfig;
     RecompilerLocalVariables localvariablesTemp;
