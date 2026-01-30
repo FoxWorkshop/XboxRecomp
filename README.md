@@ -12,7 +12,7 @@ This project was built (and therefore inspired) from [XenonRecomp](https://githu
 
 ### Instructions
 > [!NOTE]
-> Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it might be possible to bypass this and just call the functions directly from a XBE file, I wanted a portable solution that could support multiplatforms and not just PC, so I ended making this tool anyway. I also wanted to learn more about x86 and the process of recompilation.
+> Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it's possible to bypass this and just call the functions directly from a XBE file, I wanted a portable solution that could support multiplatforms and not just PC, so I ended making this tool anyway. I also wanted to learn more about x86 and the process of recompilation.
 
 ### Global Variables
 
