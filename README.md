@@ -17,7 +17,7 @@ This project was built (and therefore inspired) from [XenonRecomp](https://githu
 ### Global Variables
 
 Global variables are not recompiled, instead, when the recompilated game needs to access them, it will browse them in the reserved memory region that contains all the XBE data. When the game needs to access a variable,
-the macro X86_LOAD_UXX will be used (XX being the size of the variable, 8, 16, 32), and it if needs to store a value, it will use X86_STORE_UXX, this is done automatically by the recompiler by detecting instruction like mov, so you don't have to worry about implementing that, just something that you need to know.
+the macro `X86_LOAD_UXX` will be used (XX being the size of the variable, 8, 16, 32), and it if needs to store a value, it will use `X86_STORE_UXX`, this is done automatically by the recompiler by detecting instruction like `mov`, so you don't have to worry about implementing that, just something that you need to know.
 
 ### Indirect / Virtual Functions
 
