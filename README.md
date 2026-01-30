@@ -59,12 +59,14 @@ X86_FUNC(sub_XXXXXXXX)
 }
 ```
 
+Additionally, mid-asm hooks can be inserted directly into the translated C++ code at specific instruction addresses. The recompiler inserts these function calls, and users are responsible for implementing them in their recompilation project. The linker resolves them during compilation.
+
+
 > [!NOTE]
 > It's also possible to hook functions in a more "traditional" way with human readable parameters, but you would need to implement this manually like Shadow Recompiled does.
 > If you do so, you would need to handle [calling convention type](https://www.geeksforgeeks.org/cpp/calling-conventions-in-c-cpp/) as well as [ESP](https://www.c-jump.com/CIS77/ASM/Stack/S77_0040_esp_register.htm),
 > in that case, always pay extra attention to the original type and the number of ESP the function originally return, otherwise you will corrupt the stack and crash the game.
 
-Additionally, mid-asm hooks can be inserted directly into the translated C++ code at specific instruction addresses. The recompiler inserts these function calls, and users are responsible for implementing them in their recompilation project. The linker resolves them during compilation.
 
 ## Usage
 
@@ -155,7 +157,7 @@ In the `invalid_instructions` property, you can define 8-bit integer values that
 Similar to invalid instruction, `banned_addresses` allow you to skip any instruction between a defined addresses ranges. For example, Shadow Recompiled uses it to skip jmp tables that are literally inside a function which prevent their recompilation to work properly. Making the recompiler skipping that part allows the function to be rebuilt properly.
 
 
-#### Mid-asm Hooks (todo implement)
+#### Mid-asm Hooks (todo finish)
 
 ```toml
 [[midasm_hook]]
