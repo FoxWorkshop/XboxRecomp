@@ -2829,6 +2829,12 @@ bool Recompiler::Recompile(
             const std::string xmm1 = get_x86_reg(insn.operands[0].reg.value, true);
 
             if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+
+                if (insn.operands[1].reg.value < ZYDIS_REGISTER_XMM0 ||
+                    insn.operands[1].reg.value > ZYDIS_REGISTER_XMM15)
+                {
+                    throw std::runtime_error("COMISS second operand must be XMM or memory");
+                }
                 // Register comparison
                 const std::string xmm2 = get_x86_reg(insn.operands[1].reg.value, true);
                 println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), _mm_cvtss_f32({}));",
@@ -2836,14 +2842,13 @@ bool Recompiler::Recompile(
             }
             else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY) {
                 // Memory comparison - use address-based unique temp name
-                println("\tfloat comiss_temp_{:X} = X86_LOAD_F32({});",
-                    base, ea(insn.operands[1]));
-                println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), comiss_temp_{:X});",
-                    xmm1, base);
+                println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), X86_LOAD_F32({}));",
+                    xmm1, ea(insn.operands[1]));
             }
             else {
                 throw std::runtime_error("Unsupported COMISS operand");
             }
+            println("\tctx.handle_sse_exceptions();");
         }
         break;
     case ZYDIS_MNEMONIC_CALL:
@@ -6366,6 +6371,7 @@ bool Recompiler::Recompile(
         }
 
         println("\tctx.eflags.update_compare_flags_sse(_mm_cvtss_f32({}), {});", xmm1, src);
+        println("\tctx.handle_sse_exceptions();");
     }
     break;
     case ZYDIS_MNEMONIC_LAHF:
