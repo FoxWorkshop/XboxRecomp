@@ -12,12 +12,12 @@ This project was built (and therefore inspired) from [XenonRecomp](https://githu
 
 ### Instructions
 > [!NOTE]
-> Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it might be possible to bypass this and just call the functions directly from a XBE file, I wanted a portable solution that could support multiplatforms and not just PC, so I ended making this tool anyway. I also wanted to learn the process of recompilation properly.
+> Despite the original Xbox using x86 just like PC, the instructions still get converted to c++, while it's possible to bypass this and just call the functions directly from a XBE file, I wanted a portable solution that could support multiplatforms and not just PC, so I ended making this tool anyway. I also wanted to learn more about x86 and the process of recompilation.
 
 ### Global Variables
 
 Global variables are not recompiled, instead, when the recompilated game needs to access them, it will browse them in the reserved memory region that contains all the XBE data. When the game needs to access a variable,
-the macro X86_LOAD_UXX will be used (XX being the size of the variable, 8, 16, 32), and it if needs to store a value, it will use X86_STORE_UXX, this is done automatically by the recompiler by detecting instruction like mov, so you don't have to worry about implementing that, just something that you need to know.
+the macro `X86_LOAD_UXX` will be used (XX being the size of the variable, 8, 16, 32), and it if needs to store a value, it will use `X86_STORE_UXX`, this is done automatically by the recompiler by detecting instruction like `mov`, so you don't have to worry about implementing that, just something that you need to know.
 
 ### Indirect / Virtual Functions
 
@@ -59,12 +59,14 @@ X86_FUNC(sub_XXXXXXXX)
 }
 ```
 
+Additionally, mid-asm hooks can be inserted directly into the translated C++ code at specific instruction addresses. The recompiler inserts these function calls, and users are responsible for implementing them in their recompilation project. The linker resolves them during compilation.
+
+
 > [!NOTE]
 > It's also possible to hook functions in a more "traditional" way with human readable parameters, but you would need to implement this manually like Shadow Recompiled does.
 > If you do so, you would need to handle [calling convention type](https://www.geeksforgeeks.org/cpp/calling-conventions-in-c-cpp/) as well as [ESP](https://www.c-jump.com/CIS77/ASM/Stack/S77_0040_esp_register.htm),
 > in that case, always pay extra attention to the original type and the number of ESP the function originally return, otherwise you will corrupt the stack and crash the game.
 
-Additionally, mid-asm hooks can be inserted directly into the translated C++ code at specific instruction addresses. The recompiler inserts these function calls, and users are responsible for implementing them in their recompilation project. The linker resolves them during compilation.
 
 ## Usage
 
@@ -155,7 +157,7 @@ In the `invalid_instructions` property, you can define 8-bit integer values that
 Similar to invalid instruction, `banned_addresses` allow you to skip any instruction between a defined addresses ranges. For example, Shadow Recompiled uses it to skip jmp tables that are literally inside a function which prevent their recompilation to work properly. Making the recompiler skipping that part allows the function to be rebuilt properly.
 
 
-#### Mid-asm Hooks (todo implement)
+#### Mid-asm Hooks (todo finish)
 
 ```toml
 [[midasm_hook]]
