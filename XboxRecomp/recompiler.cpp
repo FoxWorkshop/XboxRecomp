@@ -4968,19 +4968,20 @@ bool Recompiler::Recompile(
             if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
                 const int src_reg = src.reg.value - ZYDIS_REGISTER_XMM0;
-                if (dst_reg == src_reg) {
-                    println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, src_reg);
-                }
-                else {
-                    println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, ctx.xmm[{}].reg);", dst_reg, dst_reg, src_reg);
-                    println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, dst_reg);
-                }
+
+                println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, _mm_rsqrt_ss(ctx.xmm[{}].reg));",
+                    dst_reg, dst_reg, src_reg);
             }
             else {
                 println("\tfloat rsqrt_{} = X86_LOAD_F32({});", base, ea(src));
                 println("\t__m128 tmp_{} = _mm_load_ss(&rsqrt_{});", base, base);
                 println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, tmp_{});", dst_reg, dst_reg, base);
                 println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, dst_reg);
+
+                println("\t__m128 rsqrt_src_{} = _mm_load_ss(reinterpret_cast<const float*>(base + {}));",
+                    base, ea(src));
+                println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, _mm_rsqrt_ss(rsqrt_src_{}));",
+                    dst_reg, dst_reg, base);
             }
             println("\tctx.handle_sse_exceptions();");
         }
