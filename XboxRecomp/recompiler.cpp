@@ -2508,17 +2508,9 @@ bool Recompiler::Recompile(
                     throw std::runtime_error("Unsupported MOVZX source size");
                 }
 
-                if (src.mem.base == ZYDIS_REGISTER_ECX && src.mem.disp.value == 4)
-                {
-                    println("\t// Optimized Xbox kernel version read");
-                    println("\t{} = (uint32_t){}(ctx.ecx.u32 + 4);", get_x86_reg(dst.reg.value), load_op);
-                }
-                else
-                {
                     println("\t{} = (uint32_t){}({});", get_x86_reg(dst.reg.value), load_op, ea(src));
                 }
             }
-        }
         break;
     case ZYDIS_MNEMONIC_MOVD:
         if (insn.insn.operand_count == 2)
