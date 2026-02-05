@@ -1148,10 +1148,10 @@ inline std::string GetXboxSignatureArray(const ZydisDecodedOperand op, const int
     }
 
     std::string offsetString = op.mem.index != 0 ? reg : std::to_string(index);
-  
 
 
-   std::string s = "XboxSignatureKey[" + offsetString + "]";
+
+    std::string s = "XboxSignatureKey[" + offsetString + "]";
 
     return s;
 }
@@ -1722,7 +1722,7 @@ bool Recompiler::Recompile(
                 return imm & 0xFFFFFFFF; // Default 32-bit
                 };
 
-   
+
 
             if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
@@ -1747,7 +1747,7 @@ bool Recompiler::Recompile(
                 if (src.mem.segment == ZYDIS_REGISTER_DS) //read
                 {
                     uint32_t offset = (uint32_t)src.mem.disp.value;
-  
+
 
                     if (isXboxSignatureArray(offset))
                     {
@@ -2508,9 +2508,9 @@ bool Recompiler::Recompile(
                     throw std::runtime_error("Unsupported MOVZX source size");
                 }
 
-                    println("\t{} = (uint32_t){}({});", get_x86_reg(dst.reg.value), load_op, ea(src));
-                }
+                println("\t{} = (uint32_t){}({});", get_x86_reg(dst.reg.value), load_op, ea(src));
             }
+        }
         break;
     case ZYDIS_MNEMONIC_MOVD:
         if (insn.insn.operand_count == 2)
@@ -2761,7 +2761,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_CMOVLE:
     case ZYDIS_MNEMONIC_CMOVNLE:
-   
+
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
@@ -2787,8 +2787,8 @@ bool Recompiler::Recompile(
             println("\t}}");
         }
         break;
-    case ZYDIS_MNEMONIC_CMOVBE: 
-    case ZYDIS_MNEMONIC_CMOVNBE: 
+    case ZYDIS_MNEMONIC_CMOVBE:
+    case ZYDIS_MNEMONIC_CMOVNBE:
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
@@ -3068,6 +3068,30 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_FADD:
         floatOperations("+", insn.operands[0].size);
         break;
+    case ZYDIS_MNEMONIC_FIADD:
+    {
+        println("\tctx.fpu.clear_flags();");
+
+        const auto& src = insn.operands[0];
+
+        if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+        {
+            if (src.size == 16)
+            {
+                println("\tvalDouble0 = ctx.fpu.st0() + (long double)(int16_t)X86_LOAD_U16({});", ea(src));
+            }
+            else if (src.size == 32)
+            {
+                println("\tvalDouble0 = ctx.fpu.st0() + (long double)(int32_t)X86_LOAD_U32({});", ea(src));
+            }
+
+            println("\tctx.fpu.st0() = valDouble0;");
+            println("\tctx.fpu.set_precision_flag();");
+            println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+        }
+    }
+
+    break;
     case ZYDIS_MNEMONIC_FADDP:
         if (insn.insn.operand_count == 0)
         {
@@ -6933,6 +6957,8 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
 
         if (shouldWrite)
         {
+
+#ifdef SHADOW_RECOMP
             // TODO: Probably should just destroy output x86 folder completely each run of this, so never have old files
             std::filesystem::path p(filePath);
             std::filesystem::create_directories(p.parent_path());
@@ -6945,6 +6971,11 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
             else {
                 printf("\nWARNING: Unable to write files!!!\n");
             }
+#else
+            f = fopen(filePath.c_str(), "wb");
+            fwrite(out.data(), 1, out.size(), f);
+            fclose(f);
+#endif
         }
 
         out.clear();
