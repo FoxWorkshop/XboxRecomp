@@ -2,7 +2,7 @@
 
 XboxRecomp is a tool that converts Xbox executables (xbe file) into C++ code, which can then be recompiled for any platform. Currently, it only supports [x86 platforms](https://en.wikipedia.org/wiki/X86), but support for [ARM](https://en.wikipedia.org/wiki/ARM_architecture_family) is planned.
 
-This project was built (and therefore inspired) from [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), most PPC logic was rewritten for x86. (Sometimes in a questionable way as assembly isn't my expertise.).
+This project was built (and therefore inspired) from [XenonRecomp](https://github.com/hedge-dev/XenonRecomp), (Sometimes in a questionable way as assembly isn't my expertise.).
 
 > [!WARNING]
 > This project isn't a plug and play or a drag drop XBE to EXE converter, this tool ONLY converts the game code to C++, which is NOT going to function correctly without a runtime backing it.
