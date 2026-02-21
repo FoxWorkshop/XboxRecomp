@@ -1534,7 +1534,7 @@ inline long double X87_FDIVR(long double res, long double A, long double B, uint
     return res;
 }
 
-inline long double X87_FDIVID_16(long double st0, int16_t B, uint32_t addr)
+inline long double X87_FIDIV_16(long double st0, int16_t B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {
@@ -1544,7 +1544,7 @@ inline long double X87_FDIVID_16(long double st0, int16_t B, uint32_t addr)
     return (st0 / (long double)B);
 }
 
-inline long double X87_FDIVID_32(long double st0, int32_t B, uint32_t addr)
+inline long double X87_FIDIV_32(long double st0, int32_t B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {
@@ -1554,7 +1554,7 @@ inline long double X87_FDIVID_32(long double st0, int32_t B, uint32_t addr)
     return (st0 / (long double)B);
 }
 
-inline long double X87_FDIVID_REG(long double st0, long double B, uint32_t addr)
+inline long double X87_FIDIV_REG(long double st0, long double B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {

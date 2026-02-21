@@ -3550,10 +3550,10 @@ bool Recompiler::Recompile(
             {
                 switch (src.size) {
                 case 16:
-                    println("\tctx.fpu.st0() = (long double)X87_FDIVID_16(ctx.fpu.st0(), {}, 0x{:X});", ea(src), base);
+                    println("\tctx.fpu.st0() = (long double)X87_FIDIV_16(ctx.fpu.st0(), (int16_t)X86_LOAD_U16({}), 0x{:X});", ea(src), base);
                     break;
                 case 32:
-                    println("\tctx.fpu.st0() = (long double)X87_FDIVID_32(ctx.fpu.st0(), {}, 0x{:X});", ea(src), base);
+                    println("\tctx.fpu.st0() = (long double)X87_FIDIV_32(ctx.fpu.st0(), (int32_t)X86_LOAD_U32({}), 0x{:X});", ea(src), base);
                     break;
                 default:
                     println("\tctx.fpu.signal_exception(FPU_EXCEPTION_INVALID);");
@@ -3562,7 +3562,7 @@ bool Recompiler::Recompile(
             }
             else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tctx.fpu.st0() = (long double)X87_FDIVID_REG(ctx.fpu.st0(), (long double){}, 0x{:X});", get_x86_reg(src.reg.value), base);
+                println("\tctx.fpu.st0() = (long double)X87_FIDIV_REG(ctx.fpu.st0(), (long double){}, 0x{:X});", get_x86_reg(src.reg.value), base);
             }
 
         }
@@ -3603,36 +3603,7 @@ bool Recompiler::Recompile(
                 }
             }
         }
-        else if (insn.insn.operand_count == 2)
-        {
-            // Case 1: FDIVR ST(1), ST(0) → ST(1) = ST(0) / ST(1)
-            if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[0].reg.value >= ZYDIS_REGISTER_ST0 &&
-                insn.operands[0].reg.value <= ZYDIS_REGISTER_ST7 &&
-                insn.operands[1].reg.value == ZYDIS_REGISTER_ST0)
-            {
-                int st_idx = insn.operands[0].reg.value - ZYDIS_REGISTER_ST0;
-                println("\tctx.fpu.st{}() = X87_FDIVR(ctx.fpu.st{}(), ctx.fpu.st0(), ctx.fpu.st{}(), 0x{:X});", st_idx, st_idx, st_idx, base);
-            }
-            // Case 2: FDIVR m32/m64 → ST(0) = [mem] / ST(0)
-            else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
-            {
-                std::string memAddr = decode_memory_operand(insn.operands[0].mem);
-                if (insn.operands[0].size == 32)
-                {
-                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), *(float*){}, ctx.fpu.st0(), 0x{:X});", memAddr, base);
-                }
-                else  // 64-bit double
-                {
-                    println("\tctx.fpu.st0() = X87_FDIVR(ctx.fpu.st0(), *(long double*){}, ctx.fpu.st0(), 0x{:X});", memAddr, base);
-                }
-            }
-            else
-            {
-                println("// ERROR: Unsupported FDIVR operand combination");
-            }
-        }
+       
 
         if (isPopVersion)
         {
