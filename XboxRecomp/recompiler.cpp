@@ -1357,22 +1357,34 @@ bool Recompiler::Recompile(
             // Add index register (if present)
             if (memOp.mem.index != ZYDIS_REGISTER_NONE)
             {
-                if (!result.empty()) result += " + ";
+                if (!result.empty()) 
+                    result += " + ";
+
                 result += get_addr_reg(memOp.mem.index);
-                if (memOp.mem.scale > 1) {
-                    result += " * " + std::to_string(memOp.mem.scale);
+
+                if (memOp.mem.scale > 1) 
+                {
+                    std::stringstream ss;
+                    ss << std::hex << "0x" << (uint32_t)memOp.mem.scale;
+                    result += " * " + ss.str();
                 }
             }
 
             // Add displacement
             if (memOp.mem.disp.value != 0)
             {
-                if (!result.empty()) {
+                std::stringstream ss;
+
+                if (!result.empty()) 
+                {
                     result += (memOp.mem.disp.value > 0) ? " + " : " - ";
-                    result += std::to_string(abs(memOp.mem.disp.value));
+                    ss << std::hex << "0x" << abs(memOp.mem.disp.value);
+                    result += ss.str();
                 }
-                else {
-                    result = std::to_string(memOp.mem.disp.value);
+                else 
+                {
+                    ss << std::hex << "0x" << memOp.mem.disp.value;
+                    result = ss.str();
                 }
             }
 
@@ -4965,15 +4977,7 @@ bool Recompiler::Recompile(
                     dst_reg, dst_reg, src_reg);
             }
             else {
-                println("\tfloat rsqrt_{} = X86_LOAD_F32({});", base, ea(src));
-                println("\t__m128 tmp_{} = _mm_load_ss(&rsqrt_{});", base, base);
-                println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, tmp_{});", dst_reg, dst_reg, base);
-                println("\tctx.xmm[{}].reg = _mm_rsqrt_ss(ctx.xmm[{}].reg);", dst_reg, dst_reg);
-
-                println("\t__m128 rsqrt_src_{} = _mm_load_ss(reinterpret_cast<const float*>(base + {}));",
-                    base, ea(src));
-                println("\tctx.xmm[{}].reg = _mm_move_ss(ctx.xmm[{}].reg, _mm_rsqrt_ss(rsqrt_src_{}));",
-                    dst_reg, dst_reg, base);
+                throw std::runtime_error("RSQRTSS with non-register operand is invalid");
             }
             println("\tctx.handle_sse_exceptions();");
         }
