@@ -1324,7 +1324,6 @@ bool Recompiler::Recompile(
     auto ea = [&](const ZydisDecodedOperand& memOp, bool address_mode = false) -> std::string
         {
             std::string result;
-
             // Helper to get address-ready register string (always .u32)
             auto get_addr_reg = [&](ZydisRegister reg) -> std::string
                 {
@@ -1398,14 +1397,19 @@ bool Recompiler::Recompile(
         };
 
 
-    auto HandleFsValue = [&](uint8_t offset, std::string reg, bool is_write = false)
+    auto HandleFsValue = [&](size_t size, uint8_t offset, std::string reg, bool is_write = false)
         {
+
+            std::string LoadAddr = "X86_LOAD_" + (std::string)GetOperandSizeName(size);
+            std::string StoreAddr = "X86_STORE_" + (std::string)GetOperandSizeName(size);
+
+
             // Host-side TEB/KPCR structure (kpcr_ptr points to this)
 
-            std::string kpcr_access = fmt::format("X86_LOAD_U32(ctx.kpcr_ptr + 0x{:X})", offset);
+            std::string kpcr_access = fmt::format("{}(ctx.kpcr_ptr + 0x{:X})", LoadAddr, offset);
 
             if (is_write)
-                kpcr_access = fmt::format("X86_STORE_U32(ctx.kpcr_ptr + 0x{:X})", offset);
+                kpcr_access = fmt::format("{}(ctx.kpcr_ptr + 0x{:X}", StoreAddr, offset);
 
 
             switch (offset)
@@ -1416,29 +1420,29 @@ bool Recompiler::Recompile(
             case 0x24:  // KPCR->Irql
             case 0x28:  // KPCR->PrcbData
                 if (is_write) {
-                    println("\t{} = {};  // Host write to FS:[0x{:X}]", kpcr_access, reg, offset);
+                    println("\t{}, {});  // write to FS:[0x{:X}]", kpcr_access, reg, offset);
                 }
                 else {
-                    println("\t{} = {};  // Host read from FS:[0x{:X}]", reg, kpcr_access, offset);
+                    println("\t{} = {};  // read from FS:[0x{:X}]", reg, kpcr_access, offset);
                 }
                 break;
 
             case 0x04:  // FS:[4] = StackBase
                 if (is_write) {
-                    println("\t{} = {};  // Guest write to FS:[4] (TLS mid-array)", kpcr_access, reg);
+                    println("\t{}, {});  // write to FS:[4] (TLS mid-array)", kpcr_access, reg);
                 }
                 else {
-                    println("\t{} = {};  // Guest read from FS:[4] (TLS mid-array)", reg, kpcr_access);
+                    println("\t{} = {};  // read from FS:[4] (TLS mid-array)", reg, kpcr_access);
                 }
                 break;
 
                 // --- Default: Unknown offsets ---
             default:
                 if (is_write) {
-                    println("\t{} = {};  // WARNING: Unknown FS write at 0x{:X}", kpcr_access, reg, offset);
+                    println("\t{}, {});  // WARNING: Unknown FS write at 0x{:X}", kpcr_access, reg, offset);
                 }
                 else {
-                    println("\t{} = 0;  // WARNING: Unknown FS read at 0x{:X}", reg, offset);
+                    println("\t{} = {};  // WARNING: Unknown FS read at 0x{:X}", reg, kpcr_access, offset);
                 }
                 break;
             }
@@ -1977,14 +1981,17 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_PUSH:
+    {
+        const auto& dst = insn.operands[0];
 
         //xbox kernel stuff
         if (insn.operands[0].mem.segment == ZYDIS_REGISTER_FS)
         {
-            uint32_t offset = insn.operands[0].mem.disp.value;
+            auto size = insn.insn.address_width;
+            uint32_t offset = dst.mem.disp.value;
             std::string tempVar = "tmp_value_" + std::to_string(base);
-            println("\tuint32_t {};", tempVar);
-            HandleFsValue(offset, tempVar);
+            println("\{} {};", GetOperandTypeName(size), tempVar);
+            HandleFsValue(size, offset, tempVar);
             println("\tX86_PUSH(ctx, base, {});", tempVar);
             break;
         }
@@ -2008,7 +2015,7 @@ bool Recompiler::Recompile(
                 GetOperandSizeName(insn.operands[0].size),
                 ea(insn.operands[0]));
         }
-
+    }
         break;
     case ZYDIS_MNEMONIC_PSHUFW:
         if (insn.insn.operand_count >= 3) {
@@ -2032,11 +2039,13 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_MOV:
         if (insn.insn.operand_count >= 2)
         {
+
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const char* srcSizeSuffix = GetOperandSizeName(src.size);
             const char* size_suffix = GetOperandSizeName(dst.size);
             uint32_t size = dst.size;
+            std::string dst_str = get_x86_reg(dst.reg.value); // Always a register for MOV
 
             //hacky way to fix indirect call using kernel address through register
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER && src.type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -2050,55 +2059,21 @@ bool Recompiler::Recompile(
                 }
             }
 
-
             //FS is Xbox kernel stuff
             //handle FS register (kernel and xbox memory stuff, e.g "FS:[0x20]")
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
             {
                 // MOV reg, FS:[offset]
                 uint32_t offset = (uint32_t)src.mem.disp.value;
-
-                if (offset == 0x4) //stackbase
-                {
-                    funcConfig.isFS = true; //next mov instruction will adjust the ptr we will need to resolve it
-                    funcConfig.RegisterStackBaseAddr = get_x86_reg(dst.reg.value);
-                    println("\t{} = (ctx.kpcr_ptr + 0x4);  //Read FS Stack Base", get_x86_reg(dst.reg.value));
-                }
-                // Special case: FS:[0x24] is 8-bit IRQL
-                else if (offset == 0x24)
-                {
-                    println("\t{} = X86_LOAD_U8(ctx.kpcr_ptr + 0x24);  //Read IRQL", get_x86_reg(dst.reg.value));
-                    if (size > 8)
-                        println("\t{} = (uint8_t)({});  //Truncate to 8-bit", get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
-
-                }
-                // Default: Host pointer read
-                else
-                {
-                    println("\t{} = (ctx.kpcr_ptr + 0x{:X});", get_x86_reg(dst.reg.value), offset);
-                }
+                HandleFsValue(size, offset, dst_str);
                 break;
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY && dst.mem.segment == ZYDIS_REGISTER_FS)
             {
                 // MOV FS:[offset], reg
                 uint32_t offset = (uint32_t)dst.mem.disp.value;
-
-                // Special case: FS:[4] expects a guest virtual address
-                if (offset == 0x4)
-                {
-                    println("\tX86_STORE_U32((ctx.kpcr_ptr + 0x4), {});", get_x86_reg(src.reg.value));
-                }
-                // Special case: FS:[0x24] is 8-bit IRQL
-                else if (offset == 0x24) {
-                    println("\tX86_STORE_U8((ctx.kpcr_ptr + 0x24), (uint8_t)({}));  // Write IRQL",
-                        get_x86_reg(src.reg.value));
-                }
-                // Default: Host pointer write
-                else
-                {
-                    println("\tX86_STORE_U32((ctx.kpcr_ptr + 0x{:X}), {});", offset, get_x86_reg(src.reg.value));
-                }
+                std::string src_str = format_operand(src, size_suffix);
+                HandleFsValue(size, offset, src_str, true);
                 break;
             }
 
@@ -2150,7 +2125,7 @@ bool Recompiler::Recompile(
 
 
             std::string src_str = format_operand(src, size_suffix);
-            std::string dst_str = get_x86_reg(dst.reg.value); // Always a register for MOV
+
 
             if (!src_str.empty())
             {
@@ -2162,23 +2137,6 @@ bool Recompiler::Recompile(
                 }
                 else
                 {
-                    if (funcConfig.isFS == true)
-                    {
-                        src_str = src_str;
-                    }
-                    if (funcConfig.isFS == true && src_str.find(funcConfig.RegisterStackBaseAddr) != std::string::npos)
-                    {
-                        //hacky fix to handle FS 0x4 ptr shenanigans
-                        if (src_str.find("X86_LOAD") != std::string::npos)
-                        {
-                            auto index = src_str.find("(");
-                            if (index != std::string::npos)
-                                src_str = src_str.substr(index); //Keep everything from '(' onward
-
-                            funcConfig.isFS = false;
-                        }
-
-                    }
                     println("\t{} = {};", dst_str, src_str);
                 }
             }
@@ -2283,43 +2241,54 @@ bool Recompiler::Recompile(
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
             {
                 uint32_t offset = src.mem.disp.value;
-                println("\t// Sign-extended FS read at offset 0x{:X}", offset);
-                std::string tempVar = "tmp_value_" + std::to_string(base);
-                HandleFsValue(offset, tempVar);
-                println("\t{} = static_cast<{}>(tmp_value);", get_x86_reg(dst.reg.value), (dst.size == 16) ? "int16_t" : "int32_t");
+
+                if (src.size == 8)
+                {
+                    println("\tint8_t tmp = (int8_t)X86_LOAD_U8(ctx.kpcr_ptr + 0x{:X});", offset);
+                    println("\t{} = (int32_t)tmp;", get_x86_reg(dst.reg.value));
+                }
+                else if (src.size == 16)
+                {
+                    println("\tint16_t tmp = (int16_t)X86_LOAD_U16(ctx.kpcr_ptr + 0x{:X});", offset);
+                    println("\t{} = (int32_t)tmp;", get_x86_reg(dst.reg.value));
+                }
+
                 break;
             }
+            else
+            {
 
-            if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
-            {
-                //Handle sign extension from smaller to larger register
-                if (src.size == 8) {
-                    println("\t{} = static_cast<{}>(static_cast<int8_t>({}));",
-                        get_x86_reg(dst.reg.value),
-                        (dst.size == 16) ? "int16_t" : "int32_t",  // destination type
-                        get_x86_reg(src.reg.value));
+                if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                {
+                    //Handle sign extension from smaller to larger register
+                    if (src.size == 8) {
+                        println("\t{} = static_cast<{}>(static_cast<int8_t>({}));",
+                            get_x86_reg(dst.reg.value),
+                            (dst.size == 16) ? "int16_t" : "int32_t",  // destination type
+                            get_x86_reg(src.reg.value));
+                    }
+                    else if (src.size == 16) {
+                        println("\t{} = static_cast<int32_t>(static_cast<int16_t>({}));",
+                            get_x86_reg(dst.reg.value),
+                            get_x86_reg(src.reg.value));
+                    }
                 }
-                else if (src.size == 16) {
-                    println("\t{} = static_cast<int32_t>(static_cast<int16_t>({}));",
-                        get_x86_reg(dst.reg.value),
-                        get_x86_reg(src.reg.value));
-                }
-            }
-            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
-            {
-                //Handle memory source with sign extension
-                if (src.size == 8) {
-                    println("\t{} = static_cast<{}>(static_cast<int8_t>(X86_LOAD_{}({})));",
-                        get_x86_reg(dst.reg.value),
-                        (dst.size == 16) ? "int16_t" : "int32_t",  //destination type
-                        srcSizeSuffix,
-                        ea(src));
-                }
-                else if (src.size == 16) {
-                    println("\t{} = static_cast<int32_t>(static_cast<int16_t>(X86_LOAD_{}({})));",
-                        get_x86_reg(dst.reg.value),
-                        srcSizeSuffix,
-                        ea(src));
+                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                {
+                    //Handle memory source with sign extension
+                    if (src.size == 8) {
+                        println("\t{} = static_cast<{}>(static_cast<int8_t>(X86_LOAD_{}({})));",
+                            get_x86_reg(dst.reg.value),
+                            (dst.size == 16) ? "int16_t" : "int32_t",  //destination type
+                            srcSizeSuffix,
+                            ea(src));
+                    }
+                    else if (src.size == 16) {
+                        println("\t{} = static_cast<int32_t>(static_cast<int16_t>(X86_LOAD_{}({})));",
+                            get_x86_reg(dst.reg.value),
+                            srcSizeSuffix,
+                            ea(src));
+                    }
                 }
             }
         }
@@ -2439,23 +2408,16 @@ bool Recompiler::Recompile(
 
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY && src.mem.segment == ZYDIS_REGISTER_FS)
             {
+
                 uint32_t offset = src.mem.disp.value;
                 auto dst_reg = get_x86_reg(dst.reg.value);
 
-                switch (offset)
-                {
-                case 0x24:
-                    println("\t{} = X86_LOAD_U32(ctx.kpcr_ptr + 0x24);",
-                        dst_reg);
-                    break;
-                case 0x28:  // RPC Handle (byte access)
-                    println("\t{} = X86_LOAD_U8(ctx.kpcr_ptr + 0x28);",
-                        dst_reg);
-                    break;
-                default:
-                    println("\t{} = 0; // Unknown FS byte offset: 0x{:X}", dst_reg, offset);
-                    break;
-                }
+                std::string tempVar = "tmp_value_" + std::to_string(base);
+                println("\t{} {};", GetOperandTypeName(src.size), tempVar);
+                HandleFsValue(src.size, offset, tempVar);
+
+                println("\t{} = ({}){};", get_x86_reg(dst.reg.value), GetOperandTypeName(dst.size), tempVar);
+         
             }
             else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
@@ -2520,7 +2482,8 @@ bool Recompiler::Recompile(
                     throw std::runtime_error("Unsupported MOVZX source size");
                 }
 
-                println("\t{} = (uint32_t){}({});", get_x86_reg(dst.reg.value), load_op, ea(src));
+                std::string memoryAddr = ea(src);
+                println("\t{} = ({}){}({});", get_x86_reg(dst.reg.value), GetOperandTypeName(dst.size), load_op, memoryAddr);
             }
         }
         break;
@@ -2888,7 +2851,7 @@ bool Recompiler::Recompile(
                 else
                 {
                     // Indirect call (memory operand)
-                    println("\tauto ptr_{} = *(uint32_t*)(base + " + ea(insn.operands[0]) + ");", base);
+                    println("\tauto ptr_{} = X86_LOAD_U32({});", base, ea(insn.operands[0]));
                     println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
                     println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
                 }
@@ -3944,6 +3907,8 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_POP:
+    {
+
         //xbox kernel stuff
         if (insn.operands[0].mem.segment == ZYDIS_REGISTER_FS)
         {
@@ -3963,6 +3928,7 @@ bool Recompiler::Recompile(
             const char* size_suffix = GetOperandSizeName(dst.size);
             println("\tX86_STORE_{}({}, X86_POP(ctx, base));", size_suffix, ea(dst));
         }
+    }
         break;
     case ZYDIS_MNEMONIC_RET:
         if (insn.insn.operand_count > 0 && insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
