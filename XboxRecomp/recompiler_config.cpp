@@ -1,9 +1,11 @@
 #include "recompiler_config.h"
 #include <iostream>
+#include <toml++/toml.hpp>
+#include <algorithm>
 
 void RecompilerConfig::Load(const std::string_view& configFilePath)
 {
-    directoryPath = configFilePath.substr(0, configFilePath.find_last_of("\\/") + 1);
+    directoryPath = configFilePath.substr(0, configFilePath.find_last_of('/') + 1);
 
 
     toml::table toml = toml::parse_file(configFilePath)

@@ -127,7 +127,7 @@ struct Recompiler
     void Analyse();
 
 
-    bool Recompiler::Recompile(
+    bool Recompile(
         const Function& fn,
         uint32_t base,
         const x86_insn& insn,
@@ -142,7 +142,7 @@ struct Recompiler
 
     void SaveCurrentOutData(const std::string_view& name = std::string_view());
 
-    void Recompiler::HandleSseScalarInstruction(const x86_insn& insn,
+    void HandleSseScalarInstruction(const x86_insn& insn,
         const std::function<std::string(size_t)>& xmm,
         const std::function<std::string(const ZydisDecodedOperandMem&)>& decode_memory_operand,
         const char* op_symbol, size_t base);
