@@ -1518,10 +1518,6 @@ inline void X87_ISDIV_VALID(long double A, long double B, uint32_t addr)
             printf("WARNING, DIVISION RESULT IS INF!!! (%Lf / %Lf) %x\n", A, B, addr);
         }
 
-        if (std::isnan(result))
-        {
-            printf("WARNING, DIVISION RESULT IS NAN!!! (%Lf / %Lf) %x\n", A, B, addr);
-        }
     }
 }
 
