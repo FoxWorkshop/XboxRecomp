@@ -6812,7 +6812,7 @@ void Recompiler::Recompile(const std::filesystem::path& headerFilePath)
             println("#include \"x86_recomp_shared.h\"\n");
         }
 
-        if ((i % 180) == 0 || (i == (functions.size() - 1)))
+        if ((i % 600) == 0 || (i == (functions.size() - 1)))
             fmt::println("Recompiling functions... {}%", static_cast<float>(i + 1) / functions.size() * 100.0f);
 
 
