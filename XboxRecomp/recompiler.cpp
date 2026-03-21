@@ -6453,13 +6453,6 @@ bool Recompiler::Recompile(const Function& fn)
     for (size_t addr = base; addr < end; addr += insn.length)
     {
 
-        size_t offset = addr - base;
-        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, data + offset, end, &insn, operands)))
-        {
-            addr++;
-            continue;
-        }
-
         auto invalidInstr = config.invalidInstructions.find(addr);
         if (invalidInstr != config.invalidInstructions.end())
         {
@@ -6480,6 +6473,15 @@ bool Recompiler::Recompile(const Function& fn)
             for (auto label : switchTable->second.labels)
                 labels.emplace(label);
         }
+
+
+        size_t offset = addr - base;
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, data + offset, end, &insn, operands)))
+        {
+            addr++;
+            continue;
+        }
+
 
         // Handle jumps
         if (insn.mnemonic >= ZYDIS_MNEMONIC_JB && insn.mnemonic <= ZYDIS_MNEMONIC_JZ)
@@ -6559,7 +6561,6 @@ bool Recompiler::Recompile(const Function& fn)
 
         if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, data + offset, end, &insn, operands)))
         {
-            addr += 1;
             continue;
         }
 
@@ -6649,7 +6650,6 @@ bool Recompiler::Recompile(const Function& fn)
             auto addrEnd = base + invalidInstr->second;
             auto skipLength = addrEnd - base;
             base += skipLength;
-            continue;
         }
 
         // Handle labels
