@@ -61,8 +61,8 @@ struct Function
 
 
     //static Function Function::Analyze(const void* code, size_t size, size_t base);
-    static Function Function::Analyze(const void* code, size_t end, size_t base, std::unordered_map<uint32_t, RecompilerSwitchTable>& switchTable);
-    static void Function::VfTableAnalyze(const void* code, size_t size, size_t base, Section section, std::unordered_set<size_t>& analysedFuncs, std::unordered_set<size_t>& subFunctionsFromVirtualFunc);
+    static Function Analyze(const void* code, size_t end, size_t base, std::unordered_map<uint32_t, RecompilerSwitchTable>& switchTable);
+    static void VfTableAnalyze(const void* code, size_t size, size_t base, Section section, std::unordered_set<size_t>& analysedFuncs, std::unordered_set<size_t>& subFunctionsFromVirtualFunc);
     //static Function Function::Analyze(const void* code, size_t size, size_t base, size_t jmpAddr, const size_t sectionStart, const size_t sectionEnd, std::unordered_map<uint32_t, RecompilerSwitchTable>* switchTable);
 
     bool operator==(const Function& other) const {

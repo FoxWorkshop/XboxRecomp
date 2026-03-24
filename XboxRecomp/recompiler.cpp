@@ -35,6 +35,11 @@ bool Recompiler::LoadConfig(const std::string_view& configFilePath)
     if (file.empty())
     {
         file = LoadFile((config.directoryPath + config.filePath).c_str());
+        if (file.empty())
+        {
+            printf("Error: Failed to load file\n");
+            return false;
+        }
     }
 
     image = Image::ParseImage(file.data(), file.size());
@@ -6875,9 +6880,11 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
         // Check if an identical file already exists first to not trigger recompilation
         std::string directoryPath = config.directoryPath;
         if (!directoryPath.empty())
-            directoryPath += "\\";
+            directoryPath += "/";
 
-        std::string filePath = fmt::format("{}{}\\{}", directoryPath, config.outDirectoryPath, name.empty() ? cppName : name);
+        std::string filePath = fmt::format("{}{}/{}", directoryPath, config.outDirectoryPath, name.empty() ? cppName : name);
+        const std::filesystem::path p(filePath);
+        std::filesystem::create_directories(p.parent_path());
         FILE* f = fopen(filePath.c_str(), "rb");
         if (f)
         {

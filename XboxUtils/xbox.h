@@ -2,6 +2,14 @@
 #include <cstdint>
 #include <string>
 
+#ifndef IN
+#define IN
+#endif
+
+#ifndef _WIN32
+using PVOID = void*;
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
