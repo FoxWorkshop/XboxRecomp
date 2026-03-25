@@ -76,6 +76,9 @@
 #define X86_LOAD_APS(addr) _mm_load_ps(reinterpret_cast<const float*>(base + (addr)))
 #define X86_STORE_APS(addr, val) _mm_store_ps(reinterpret_cast<float*>(base + (addr)), (val))
 #define X86_STORE_NTPS(addr, val) _mm_stream_ps(reinterpret_cast<float*>(base + (addr)), (val))
+#define X86_STORE_NTQ(addr, val) \
+    _mm_stream_si64(reinterpret_cast<long long*>(base + (addr)), \
+                    static_cast<long long>(val))
 
 // Register Operations
 #define X86_MOVAPS_REG(dest, src) \
@@ -1558,6 +1561,39 @@ inline long double X87_FIDIV_REG(long double st0, long double B, uint32_t addr)
     }
 
     return (st0 / B);
+}
+
+inline uint32_t X86_RCR32(uint32_t val, uint8_t shift, X86EFlags& eflags)
+{
+    if (shift == 0) return val;
+    shift %= 33;
+
+    uint8_t old_cf = (eflags.value & X86EFlags::CF) ? 1 : 0;
+
+    uint64_t wide = ((uint64_t)old_cf << 32) | val;
+    wide = (wide >> shift) | (wide << (33 - shift));
+    wide &= 0x1FFFFFFFFULL;
+
+    uint32_t result = static_cast<uint32_t>(wide);
+    uint8_t new_cf = (wide >> 32) & 1;
+
+    // Update CF
+    if (new_cf)
+        eflags.value |= X86EFlags::CF;
+    else
+        eflags.value &= ~X86EFlags::CF;
+
+
+    if (shift == 1)
+    {
+        uint8_t of = ((result >> 31) & 1) ^ old_cf;
+        if (of)
+            eflags.value |= X86EFlags::OF;
+        else
+            eflags.value &= ~X86EFlags::OF;
+    }
+
+    return result;
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

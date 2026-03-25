@@ -1860,7 +1860,7 @@ bool Recompiler::Recompile(
                 {
                     println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnFalse);
                 }
-
+     
                 println("\t}}");
             }
             else
@@ -2610,6 +2610,16 @@ bool Recompiler::Recompile(
         {
             const int src_reg = insn.operands[1].reg.value - ZYDIS_REGISTER_XMM0;
             println("\tX86_STORE_NTPS({}, ctx.xmm[{}].reg);",
+                ea(insn.operands[0]), src_reg);
+        }
+        break;
+    case ZYDIS_MNEMONIC_MOVNTQ:
+        if (insn.insn.operand_count >= 2 &&
+            insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY &&
+            insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
+        {
+            const int src_reg = insn.operands[1].reg.value - ZYDIS_REGISTER_MM0;
+            println("\tX86_STORE_NTQ({}, MMX_REG({}));",
                 ea(insn.operands[0]), src_reg);
         }
         break;
@@ -6047,6 +6057,30 @@ bool Recompiler::Recompile(
                 println("\t\t{} = {};", acc_reg, current);
                 println("\t\tctx.eflags.value &= ~X86EFlags::ZF;");
                 println("\t}}");
+            }
+        }
+        break;
+    case ZYDIS_MNEMONIC_RCR:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const char* size_suffix = GetOperandSizeName(dst.size);
+
+            auto shift_expr = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                ? std::to_string(insn.operands[1].imm.value.u)
+                : std::string("ctx.ecx.u8_lo");
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                println("\t{} = X86_RCR32({}, {}, ctx.eflags);",
+                    get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_expr);
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                std::string temp = "temp_" + std::to_string(base);
+                println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
+                println("\tX86_STORE_{}({}, X86_RCR32({}, {}, ctx.eflags));",
+                    size_suffix, ea(dst), temp, shift_expr);
             }
         }
         break;
