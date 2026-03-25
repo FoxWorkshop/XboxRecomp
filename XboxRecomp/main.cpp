@@ -11,7 +11,8 @@ int main(int argc, char* argv[])
     }
 #endif*/
 
-    std::string tomlPath, x86Context = "";
+    std::string tomlPath, x86Context, xbePath = "";
+
 
 #ifdef _DEBUG
     if (argc < 3)
