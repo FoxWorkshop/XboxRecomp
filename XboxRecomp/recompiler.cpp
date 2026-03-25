@@ -1838,18 +1838,28 @@ bool Recompiler::Recompile(
                 println(")) {{");
 
                 if (midAsmHook->second.returnOnTrue)
+                {
+                    println("\t\tctx.esp.u32 += {};", midAsmHook->second.espReturn);
                     println("\t\treturn;");
+                }
                 else if (midAsmHook->second.jumpAddressOnTrue != NULL)
+                {
                     println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnTrue);
+                }
 
                 println("\t}}");
 
                 println("\telse {{");
 
                 if (midAsmHook->second.returnOnFalse)
+                {
+                    println("\t\tctx.esp.u32 += {};", midAsmHook->second.espReturn);
                     println("\t\treturn;");
+                }
                 else if (midAsmHook->second.jumpAddressOnFalse != NULL)
+                {
                     println("\t\tgoto loc_{:X};", midAsmHook->second.jumpAddressOnFalse);
+                }
 
                 println("\t}}");
             }
