@@ -3,34 +3,10 @@
 
 int main(int argc, char* argv[])
 {
-/*/#ifndef XBOX_RECOMP_CONFIG_FILE_PATH 
+#ifndef XBOX_RECOMP_CONFIG_FILE_PATH 
     if (argc < 3)
     {
         printf("Usage: XboxRecomp [input TOML file path] [x86 context header file path]");
-        return EXIT_SUCCESS;
-    }
-#endif*/
-
-    std::string tomlPath, x86Context, xbePath = "";
-
-
-#ifdef _DEBUG
-    if (argc < 3)
-    {
-        tomlPath = R"(../../../../../../ShadowRecompLib/config/recompConfig.toml)";
-        x86Context = R"(../../../../../../tools/XboxRecomp/XboxUtils/x86_context.h)";
-    }
-    else
-    {
-        tomlPath = argv[1];
-    }
-#else
-    xbePath = argv[1];
-    tomlPath = argv[2];
-
-    if (argc < 3)
-    {
-        printf("Usage: XboxAnalyse [input XBE file path ex: default.xbe] [output jump table TOML file path ex: out.toml]");
         return EXIT_SUCCESS;
     }
 #endif
@@ -42,9 +18,6 @@ int main(int argc, char* argv[])
         argv[1]
     #endif
         ;
-
-    if (tomlPath != "")
-        path = tomlPath.c_str();
 
     if (std::filesystem::is_regular_file(path))
     {
@@ -60,13 +33,13 @@ int main(int argc, char* argv[])
             entry->name = "_xstart";
         }
 
-        const char* headerFilePath = x86Context.c_str();
-/**#ifdef XBOX_RECOMP_HEADER_FILE_PATH
+        const char* headerFilePath = 
+#ifdef XBOX_RECOMP_HEADER_FILE_PATH
             XBOX_RECOMP_HEADER_FILE_PATH
 #else
-            argv[2]
+        argv[2]
 #endif
-            ;*/
+            ;
 
         recompiler.Recompile(headerFilePath);
     }
