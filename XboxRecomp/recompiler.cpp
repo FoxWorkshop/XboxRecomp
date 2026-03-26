@@ -3299,6 +3299,7 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_FSUBR:
+    case ZYDIS_MNEMONIC_FSUBRP:
         println("\tctx.fpu.clear_flags();");
 
         if (insn.insn.operand_count >= 2)
@@ -3401,6 +3402,10 @@ bool Recompiler::Recompile(
         }
 
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
+
+        if (insn.insn.mnemonic == ZYDIS_MNEMONIC_FSUBRP)
+            println("\tctx.fpu.pop();");
+
         break;
     case ZYDIS_MNEMONIC_FMULP:
         if (insn.insn.operand_count == 0)
