@@ -409,7 +409,7 @@ struct X86EFlags
         if (rhs == 0)
         {
             value |= (result == 0) ? ZF : 0;
-            value |= (result & 0x80000000) ? SF : 0; 
+            value |= (result & 0x80000000) ? SF : 0;
             uint8_t lsb = result & 0xFF;
             value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
             return;  // Skip CF/OF/AF for this case!
@@ -981,7 +981,7 @@ struct X87FPU
             X86_STORE_U16(addr + 8, tw);
 
             // Save registers in physical order (ST(0) is at position 'top')
-            for (int i = 0; i < 8; i++) 
+            for (int i = 0; i < 8; i++)
             {
                 // Convert long double to 80-bit extended precision
                 X86_STORE_F80(addr + 28 + i * 10, st[i]);
@@ -1011,7 +1011,7 @@ struct X87FPU
             tw = X86_LOAD_U16(addr + 8);
 
             // Save registers in physical order (ST(0) is at position 'top')
-            for (int i = 0; i < 8; i++) 
+            for (int i = 0; i < 8; i++)
             {
                 // Convert long double to 80-bit extended precision
                 st[i] = X86_LOAD_F80(addr + 28 + i * 10);
@@ -1275,6 +1275,37 @@ inline uint32_t X86_POP(X86Context& ctx, uint8_t* base)
     return value;
 }
 
+// CONDITION CODE HELPER
+inline bool X86_CC_O(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::OF) != 0; }
+inline bool X86_CC_NO(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::OF) == 0; }
+inline bool X86_CC_B(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::CF) != 0; }
+inline bool X86_CC_NB(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::CF) == 0; }
+inline bool X86_CC_Z(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::ZF) != 0; }
+inline bool X86_CC_NZ(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::ZF) == 0; }
+inline bool X86_CC_BE(const X86Context& ctx) { return (ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)) != 0; }
+inline bool X86_CC_NBE(const X86Context& ctx) { return (ctx.eflags.value & (X86EFlags::CF | X86EFlags::ZF)) == 0; }
+inline bool X86_CC_S(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::SF) != 0; }
+inline bool X86_CC_NS(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::SF) == 0; }
+inline bool X86_CC_P(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::PF) != 0; }
+inline bool X86_CC_NP(const X86Context& ctx) { return (ctx.eflags.value & X86EFlags::PF) == 0; }
+inline bool X86_CC_L(const X86Context& ctx)
+{
+    return ((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0);
+}
+inline bool X86_CC_NL(const X86Context& ctx)
+{
+    return ((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0);
+}
+inline bool X86_CC_LE(const X86Context& ctx)
+{
+    return (ctx.eflags.value & X86EFlags::ZF) != 0 || X86_CC_L(ctx);
+}
+inline bool X86_CC_NLE(const X86Context& ctx)
+{
+    return (ctx.eflags.value & X86EFlags::ZF) == 0 && X86_CC_NL(ctx);
+}
+// end CC HELPER
+
 inline bool X86_ATOMIC_CMPXCHG_U32(uint8_t* base, uint32_t addr, uint32_t& eax_val, uint32_t desired_val)
 {
     auto* ptr = reinterpret_cast<std::atomic<uint32_t>*>(base + addr);
@@ -1466,7 +1497,7 @@ inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
 
     if (st0 == 0.0L)
     {
-       // printf("WARNING, DIVIDE PER 0!!!\n%x", addr);
+        // printf("WARNING, DIVIDE PER 0!!!\n%x", addr);
 
         if (st1 == 0.0L) {
             fpu.sw |= 0x01;  // IE flag - 0/0
@@ -1594,6 +1625,115 @@ inline uint32_t X86_RCR32(uint32_t val, uint8_t shift, X86EFlags& eflags)
     }
 
     return result;
+}
+
+inline void X86_DIV8(uint32_t divisor, X86Context& ctx)
+{
+
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    uint16_t dividend_ = ctx.eax.u16;
+    uint8_t divisor_ = static_cast<uint8_t>(divisor);
+
+    uint16_t temp_quotient_ = dividend_ / divisor_;
+
+    if (__builtin_expect(temp_quotient_ > UINT8_MAX, 0))
+    {
+        return;
+    }
+
+    uint8_t quotient_var = static_cast<uint8_t>(temp_quotient_);
+    uint8_t remainder_var = static_cast<uint8_t>(dividend_ % divisor_);
+
+    ctx.eax.u8_lo = quotient_var;
+    ctx.eax.u8_hi = remainder_var;
+}
+
+inline void X86_DIV16(uint32_t divisor, X86Context& ctx)
+{
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    uint32_t dividend_ = (static_cast<uint32_t>(ctx.edx.u16) << 16) | ctx.eax.u16;
+    uint16_t divisor_ = static_cast<uint16_t>(divisor);
+    uint32_t quotient_ = dividend_ / divisor_;
+    uint32_t remainder_ = dividend_ % divisor_;
+
+    if (__builtin_expect(quotient_ > UINT16_MAX, 0))
+        return;
+
+    ctx.eax.u16 = static_cast<uint16_t>(quotient_);
+    ctx.edx.u16 = static_cast<uint16_t>(remainder_);
+}
+
+inline void X86_DIV32(uint32_t divisor, X86Context& ctx)
+{
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    uint64_t dividend_ = (static_cast<uint64_t>(ctx.edx.u32) << 32) | ctx.eax.u32;
+    uint32_t divisor_ = static_cast<uint32_t>(divisor);
+    uint64_t quotient_ = dividend_ / divisor_;
+    uint64_t remainder_ = dividend_ % divisor_;
+
+    if (__builtin_expect(quotient_ > UINT32_MAX, 0))
+        return;
+
+    ctx.eax.u32 = static_cast<uint32_t>(quotient_);
+    ctx.edx.u32 = static_cast<uint32_t>(remainder_);
+}
+
+inline void X86_IDIV8(uint32_t divisor, X86Context& ctx)
+{
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    int16_t dividend = static_cast<int16_t>(ctx.eax.u16);
+    int8_t  divisor_ = static_cast<int8_t>(divisor);
+    int16_t quotient = dividend / divisor_;
+
+    if (__builtin_expect(quotient > INT8_MAX || quotient < INT8_MIN, 0))
+        return;
+    ctx.eax.u8_lo = static_cast<uint8_t>(static_cast<int8_t>(quotient));
+    ctx.eax.u8_hi = static_cast<uint8_t>(static_cast<int8_t>(dividend % divisor_));
+}
+
+inline void X86_IDIV16(uint32_t divisor, X86Context& ctx)
+{
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    // DX sign-extended to form high word, AX is raw bits for low word
+
+    int32_t dividend = (static_cast<int32_t>(static_cast<int16_t>(ctx.edx.u16)) << 16) | static_cast<uint32_t>(ctx.eax.u16);
+    int16_t divisor_ = static_cast<int16_t>(divisor);
+    int32_t quotient = dividend / divisor_;
+    int32_t remainder = dividend % divisor_;
+
+    if (__builtin_expect(quotient > INT16_MAX || quotient < INT16_MIN, 0))
+        return;
+
+    ctx.eax.u16 = static_cast<uint16_t>(static_cast<int16_t>(quotient));
+    ctx.edx.u16 = static_cast<uint16_t>(static_cast<int16_t>(remainder));
+}
+
+inline void X86_IDIV32(uint32_t divisor, X86Context& ctx)
+{
+    if (__builtin_expect(divisor == 0, 0))
+        return;
+
+    // EDX sign-extended to form high dword, EAX is raw bits for low dword
+    int64_t dividend = (static_cast<int64_t>(static_cast<int32_t>(ctx.edx.u32)) << 32) | static_cast<uint64_t>(ctx.eax.u32);
+    int32_t divisor_ = static_cast<int32_t>(divisor);
+    int64_t quotient = dividend / divisor_;
+    int64_t remainder = dividend % divisor_;
+
+    if (__builtin_expect(quotient > INT32_MAX || quotient < INT32_MIN, 0))
+        return;
+
+    ctx.eax.u32 = static_cast<uint32_t>(static_cast<int32_t>(quotient));
+    ctx.edx.u32 = static_cast<uint32_t>(static_cast<int32_t>(remainder));
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

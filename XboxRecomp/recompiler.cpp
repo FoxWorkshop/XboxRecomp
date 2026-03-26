@@ -26,8 +26,9 @@
 
 bool Recompiler::LoadConfig(const std::string_view& configFilePath)
 {
-    printf("Init...\n");
-    printf("Loading config file...\n");
+    printf("[XboxRecomp] Init...\n");
+    printf("[XboxRecomp] Loading config file %s...\n", configFilePath.data());
+
     config.Load(configFilePath);
 
     std::vector<uint8_t> file;
@@ -37,7 +38,7 @@ bool Recompiler::LoadConfig(const std::string_view& configFilePath)
         file = LoadFile((config.directoryPath + config.filePath).c_str());
         if (file.empty())
         {
-            printf("Error: Failed to load file\n");
+            printf("[XboxRecomp] Error: Failed to load config file.\n");
             return false;
         }
     }
@@ -3839,96 +3840,96 @@ bool Recompiler::Recompile(
         break; //todo check if this is correct
     case ZYDIS_MNEMONIC_JZ:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) != 0", base, insn);
+            printConditionalBranch(false, "X86_CC_Z(ctx)", base, insn);
         }
         break;
 
         // For JNZ (Jump if Not Zero)
     case ZYDIS_MNEMONIC_JNZ:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::ZF) == 0", base, insn);
+            printConditionalBranch(false, "X86_CC_NZ(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JBE:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "((ctx.eflags.value & X86EFlags::CF) != 0) || ((ctx.eflags.value & X86EFlags::ZF) != 0)",
+                "X86_CC_BE(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNBE:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "((ctx.eflags.value & X86EFlags::CF) == 0) && ((ctx.eflags.value & X86EFlags::ZF) == 0)",
+                "X86_CC_NBE(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JB:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::CF) != 0", base, insn);
+            printConditionalBranch(false, "X86_CC_B(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNB:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::CF) == 0", base, insn);
+            printConditionalBranch(false, "X86_CC_NB(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JL:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "(((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                "X86_CC_L(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JLE:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "((ctx.eflags.value & X86EFlags::ZF) != 0) || (((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                "X86_CC_LE(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNLE:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "((ctx.eflags.value & X86EFlags::ZF) == 0) && (((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                "X86_CC_NLE(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNL:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false,
-                "(((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0))",
+                "X86_CC_NL(ctx)",
                 base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNS:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF) == 0", base, insn);
+            printConditionalBranch(false, "X86_CC_NS(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JS:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::SF) != 0", base, insn);
+            printConditionalBranch(false, "X86_CC_S(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JP:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::PF) != 0", base, insn);
+            printConditionalBranch(false, "X86_CC_P(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNP:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::PF) == 0", base, insn);
+            printConditionalBranch(false, "X86_CC_NP(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JO:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::OF) != 0", base, insn);
+            printConditionalBranch(false, "X86_CC_O(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_JNO:
         if (insn.insn.operand_count >= 1) {
-            printConditionalBranch(false, "(ctx.eflags.value & X86EFlags::OF) == 0", base, insn);
+            printConditionalBranch(false, "X86_CC_NO(ctx)", base, insn);
         }
         break;
     case ZYDIS_MNEMONIC_POP:
@@ -4194,125 +4195,36 @@ bool Recompiler::Recompile(
         std::string divisor = (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
             ? get_x86_reg(op.reg.value) : fmt::format("X86_LOAD_{}({})", size_suffix, ea(op));
 
-        println("\tif (__builtin_expect({} == 0, 0)) {{", divisor);
-        println("\t\treturn; //Handle divide error exception");
-        println("\t}}");
-
         if (op.size == 8)
         {
-            std::string dividend = fmt::format("dividend_{:X}", base);
-            std::string quotient_var = fmt::format("quotient_{:X}", base);
-            std::string remainder_var = fmt::format("remainder_{:X}", base);
-
-            if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV) {
-                // 8-bit signed division: AX / r/m8 -> AL(quotient), AH(remainder)
-                println("\tint16_t {} = static_cast<int16_t>(ctx.eax.u16);", dividend);
-                println("\tint8_t divisor_{} = static_cast<int8_t>({});", base, divisor);
-
-                println("\tint16_t temp_quotient_{} = {} / divisor_{};", base, dividend, base);
-                println("\tif (__builtin_expect(temp_quotient_{} > INT8_MAX || temp_quotient_{} < INT8_MIN, 0)) {{");
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tint8_t {} = static_cast<int8_t>(temp_quotient_{});", quotient_var);
-                println("\tint8_t {} = static_cast<int8_t>({} % divisor_{});", remainder_var, dividend, base);
-
-                println("\tctx.eax.u8_lo = static_cast<uint8_t>({});", quotient_var);
-                println("\tctx.eax.u8_hi = static_cast<uint8_t>({});", remainder_var);
+            if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV) 
+            {
+                println("\tX86_IDIV8(static_cast<uint32_t>({}), ctx);", divisor);
             }
             else {
-                // 8-bit unsigned division: AX / r/m8 -> AL(quotient), AH(remainder)
-                println("\tuint16_t {} = ctx.eax.u16;", dividend);
-                println("\tuint8_t divisor_{} = static_cast<uint8_t>({});", base, divisor);
-
-                println("\tuint16_t temp_quotient_{} = {} / divisor_{};", dividend, base);
-                println("\tif (__builtin_expect(temp_quotient_{} > UINT8_MAX, 0)) {{");
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tuint8_t {} = static_cast<uint8_t>(temp_quotient_{});", quotient_var);
-                println("\tuint8_t {} = static_cast<uint8_t>({} % divisor_{});", remainder_var, dividend, base);
-
-                println("\tctx.eax.u8_lo = {};", quotient_var);
-                println("\tctx.eax.u8_hi = {};", remainder_var);
+                println("\tX86_DIV8(static_cast<uint32_t>({}), ctx);", divisor);
             }
         }
         else if (op.size == 16) {
-            std::string dividend = fmt::format("dividend_{:X}", base);
-            std::string quotient_var = fmt::format("quotient_{:X}", base);
-            std::string remainder_var = fmt::format("remainder_{:X}", base);
 
             if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV)
             {
-                // 16-bit signed division: DX:AX / r/m16 -> AX(quotient), DX(remainder)
-                println("\tint32_t {} = (static_cast<int32_t>(static_cast<int16_t>(ctx.edx.u16)) << 16) | ctx.eax.u16;", dividend);
-                println("\tint16_t divisor_{} = static_cast<int16_t>({});", base, divisor);
-
-                println("\tint32_t temp_quotient_{} = {} / divisor_{};", base, dividend, base);
-                println("\tif (__builtin_expect(temp_quotient_{} > INT16_MAX || temp_quotient_{} < INT16_MIN, 0)) {{", base, base);
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tint16_t {} = static_cast<int16_t>(temp_quotient_{});", quotient_var, base);
-                println("\tint16_t {} = static_cast<int16_t>({} % divisor_{});", remainder_var, dividend, base);
-
-                println("\tctx.eax.u16 = static_cast<uint16_t>({});", quotient_var);
-                println("\tctx.edx.u16 = static_cast<uint16_t>({});", remainder_var);
+                println("\tX86_IDIV16(static_cast<uint32_t>({}), ctx);", divisor);
             }
             else {
-                // 16-bit unsigned division: DX:AX / r/m16 -> AX(quotient), DX(remainder)
-                println("\tuint32_t {} = (static_cast<uint32_t>(ctx.edx.u16) << 16) | ctx.eax.u16;", dividend);
-                println("\tuint16_t divisor_{} = static_cast<uint16_t>({});", base, divisor);
-
-                println("\tuint32_t temp_quotient_{} = {} / divisor_{};", base, dividend, base);
-                println("\tif (__builtin_expect(temp_quotient_{} > UINT16_MAX, 0)) {{", base);
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tuint16_t {} = static_cast<uint16_t>(temp_quotient_{});", quotient_var, base);
-                println("\tuint16_t {} = static_cast<uint16_t>({} % divisor_{});", remainder_var, dividend, base);
-
-                println("\tctx.eax.u16 = {};", quotient_var);
-                println("\tctx.edx.u16 = {};", remainder_var);
+                println("\tX86_DIV16(static_cast<uint32_t>({}), ctx);", divisor);
             }
         }
         else if (op.size == 32)
         {
-            std::string dividend = fmt::format("dividend_{:X}", base);
-            std::string quotient_var = fmt::format("quotient_{:X}", base);
-            std::string remainder_var = fmt::format("remainder_{:X}", base);
 
             if (insn.insn.mnemonic == ZYDIS_MNEMONIC_IDIV)
             {
-                // 32-bit signed division: EDX:EAX / r/m32 -> EAX(quotient), EDX(remainder)
-                println("\tint64_t {} = (static_cast<int64_t>(static_cast<int32_t>(ctx.edx.u32)) << 32) | ctx.eax.u32;", dividend);
-                println("\tint32_t divisor_{} = static_cast<int32_t>({});", base, divisor);
-
-                println("\tint64_t temp_quotient_{}, temp_remainder_{};", base, base);
-                println("\ttemp_quotient_{} = {} / divisor_{};", base, dividend, base);
-                println("\ttemp_remainder_{} = {} % divisor_{};", base, dividend, base);
-
-                println("\tif (__builtin_expect(temp_quotient_{} > INT32_MAX || temp_quotient_{} < INT32_MIN, 0)) {{", base, base);
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tctx.eax.u32 = static_cast<uint32_t>(static_cast<int32_t>(temp_quotient_{}));", base);
-                println("\tctx.edx.u32 = static_cast<uint32_t>(static_cast<int32_t>(temp_remainder_{}));", base);
+                println("\tX86_IDIV32(static_cast<uint32_t>({}), ctx);", divisor);
             }
-            else {
-                // 32-bit unsigned division: EDX:EAX / r/m32 -> EAX(quotient), EDX(remainder)
-                println("\tuint64_t {} = (static_cast<uint64_t>(ctx.edx.u32) << 32) | ctx.eax.u32;", dividend);
-                println("\tuint32_t divisor_{} = static_cast<uint32_t>({});", base, divisor);
-
-                println("\tuint64_t temp_quotient_{} = {} / divisor_{};", base, dividend, base);
-                println("\tuint64_t temp_remainder_{} = {} % divisor_{};", base, dividend, base);
-
-                println("\tif (__builtin_expect(temp_quotient_{} > UINT32_MAX, 0)) {{", base);
-                println("\t\treturn;");
-                println("\t}}");
-
-                println("\tctx.eax.u32 = static_cast<uint32_t>(temp_quotient_{});", base);
-                println("\tctx.edx.u32 = static_cast<uint32_t>(temp_remainder_{});", base);
+            else 
+            {
+                println("\tX86_DIV32(static_cast<uint32_t>({}), ctx);", divisor);
             }
         }
         else {
@@ -6973,3 +6885,4 @@ void Recompiler::SaveCurrentOutData(const std::string_view& name)
         out.clear();
     }
 }
+
