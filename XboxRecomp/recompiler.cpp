@@ -4478,62 +4478,6 @@ bool Recompiler::Recompile(
         println("\tctx.eflags.value = (ctx.eflags.value & 0xFFFFFF00) | ctx.eax.u8_hi;");
     }
     break;
-    case ZYDIS_MNEMONIC_SHL:
-        if (insn.insn.operand_count >= 2)
-        {
-            const auto& dst = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(dst.size);
-
-            std::string temp = "temp_" + std::to_string(base);
-
-            // SHR reg/mem, imm
-            if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                //backup value before shifting
-                uint32_t shift_count = insn.operands[1].imm.value.u;
-
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-                    println("\t{} <<= {};", get_x86_reg(dst.reg.value), shift_count);
-                    println("\tctx.eflags.update_flags_shl({}, {}, {});", temp, shift_count,
-                        get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    // Load original value
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-
-                    // Perform shift and store
-                    println("\tX86_STORE_{}({}, {} << {});", size_suffix, ea(dst), temp, shift_count);
-
-                    println("\tctx.eflags.update_flags_shl({}, {}, X86_LOAD_{}({}));",
-                        temp, shift_count, size_suffix, ea(dst));
-                }
-            }
-            else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].reg.value == ZYDIS_REGISTER_CL)
-            {
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-                    println("\t{} <<= ctx.ecx.u8_lo;", get_x86_reg(dst.reg.value));
-                    println("\tctx.eflags.update_flags_shl({}, ctx.ecx.u8_lo, {});",
-                        temp, get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-
-                    // Perform shift and store
-                    println("\tX86_STORE_{}({}, {} << ctx.ecx.u8_lo);", size_suffix, ea(dst), temp);
-
-                    //Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_shl({}, ctx.ecx.u8_lo, X86_LOAD_{}({}));", temp, size_suffix, ea(dst));
-                }
-            }
-        }
-        break;
     case ZYDIS_MNEMONIC_SHUFPS:
         if (insn.insn.operand_count >= 3)
         {
@@ -5538,56 +5482,54 @@ bool Recompiler::Recompile(
             }
         }
         break;
+    case ZYDIS_MNEMONIC_SHL:
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const char* size_suffix = GetOperandSizeName(dst.size);
 
+            // get destionation (reg or mem)
+            std::string dst_str = (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                ? get_x86_reg(dst.reg.value)
+                : fmt::format("*reinterpret_cast<uint{}_t*>({})", dst.size, ea(dst));
+
+            // Get count
+            std::string count_str = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                ? std::to_string(insn.operands[1].imm.value.u)
+                : "ctx.ecx.u8_lo";
+
+
+            if (dst.size == 8)
+                println("\tX86_SHL8({}, {}, ctx);", dst_str, count_str);
+            else if (dst.size == 16)
+                println("\tX86_SHL16({}, {}, ctx);", dst_str, count_str);
+            else if (dst.size == 32)
+                println("\tX86_SHL32({}, {}, ctx);", dst_str, count_str);
+        }
+        break;
     case ZYDIS_MNEMONIC_SHR:
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(dst.size);
 
-            std::string temp = "temp_" + std::to_string(base);
+            // get destionation (reg or mem)
+            std::string dst_str = (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+                ? get_x86_reg(dst.reg.value)
+                : fmt::format("*reinterpret_cast<uint{}_t*>({})", dst.size, ea(dst));
 
-            // SHR reg/mem, imm
-            if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                //backup value before shifting
-                uint32_t shift_count = insn.operands[1].imm.value.u;
+            // Get count
+            std::string count_str = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                ? std::to_string(insn.operands[1].imm.value.u)
+                : "ctx.ecx.u8_lo";
 
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-                    println("\t{} >>= {};", get_x86_reg(dst.reg.value), shift_count);
-                    println("\tctx.eflags.update_flags_shr({}, {}, {});", temp, shift_count, get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
 
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-                    println("\tX86_STORE_{}({}, {} >> {});", size_suffix, ea(dst), temp, shift_count);
-                    println("\tctx.eflags.update_flags_shr({}, {}, X86_LOAD_{}({}));", temp, shift_count, size_suffix, ea(dst));
-                }
-            }
-            else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].reg.value == ZYDIS_REGISTER_CL)
-            {
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-                    println("\t{} >>= ctx.ecx.u8_lo;", get_x86_reg(dst.reg.value));
-                    println("\tctx.eflags.update_flags_shr({}, ctx.ecx.u8_lo, {});",
-                        temp, get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-
-                    // Perform shift and store
-                    println("\tX86_STORE_{}({}, {} >> ctx.ecx.u8_lo);", size_suffix, ea(dst), temp);
-
-                    //Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_shr({}, ctx.ecx.u8_lo, X86_LOAD_{}({}));", temp, size_suffix, ea(dst));
-                }
-            }
+            if (dst.size == 8)
+                println("\tX86_SHR8({}, {}, ctx);", dst_str, count_str);
+            else if (dst.size == 16)
+                println("\tX86_SHR16({}, {}, ctx);", dst_str, count_str);
+            else if (dst.size == 32)
+                println("\tX86_SHR32({}, {}, ctx);", dst_str, count_str);
         }
         break;
     case ZYDIS_MNEMONIC_SHLD:

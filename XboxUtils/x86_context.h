@@ -651,56 +651,57 @@ struct X86EFlags
     }
 
     // Updates flags after SHL (Shift Left)
-    void update_flags_shl(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+    void update_flags_shl(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
+    {
         clear_eflags();
+        uint32_t bit_width = operand_size * 8;
 
-        // CF = Last bit shifted out (MSB before shift)
-        if (shift_count > 0 && shift_count <= 32) {
-            uint32_t last_shifted_out = (value_before >> (32 - shift_count)) & 1;
-            value |= (last_shifted_out) ? CF : 0;
+        // CF = last bit shifted out (MSB side)
+        if (shift_count > 0 && shift_count <= bit_width)
+        {
+            uint32_t last_shifted_out = (value_before >> (bit_width - shift_count)) & 1;
+            value |= last_shifted_out ? CF : 0;
         }
-
-        // OF = Set if sign bit changed (only for 1-bit shifts)
-        if (shift_count == 1) {
-            bool sign_before = (value_before >> 31) & 1;
-            bool sign_after = (result >> 31) & 1;
+        // OF = sign bit changed (1-bit shifts only)
+        if (shift_count == 1)
+        {
+            uint32_t sign_bit = bit_width - 1;
+            bool sign_before = (value_before >> sign_bit) & 1;
+            bool sign_after = (result >> sign_bit) & 1;
             value |= (sign_before != sign_after) ? OF : 0;
         }
-
         // SF = MSB of result
-        value |= (result >> 31) ? SF : 0;
-
-        // ZF = Result is zero
+        uint32_t sign_bit = bit_width - 1;
+        value |= (result >> sign_bit) & 1 ? SF : 0;
+        // ZF
         value |= (result == 0) ? ZF : 0;
-
-        // PF = Parity of LSB
+        // PF
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
     // Updates flags after SHR (Shift Right)
-    void update_flags_shr(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+    void update_flags_shr(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
+    {
         clear_eflags();
-
-        // CF = Last bit shifted out (LSB before shift)
-        if (shift_count > 0) {
+        if (shift_count > 0)
+        {
             uint32_t last_shifted_out = (value_before >> (shift_count - 1)) & 1;
-            value |= (last_shifted_out) ? CF : 0;
+            value |= last_shifted_out ? CF : 0;
         }
-
-        // OF = MSB of original operand for 1-bit shifts
-        if (shift_count == 1) {
-            bool msb_before = (value_before >> 31) & 1;
+        if (shift_count == 1)
+        {
+            // OF = MSB of original value, based on operand size
+            uint32_t msb_pos = (operand_size * 8) - 1;
+            bool msb_before = (value_before >> msb_pos) & 1;
             value |= msb_before ? OF : 0;
         }
 
-        // SF = MSB of result
-        value |= (result >> 31) ? SF : 0;
+        // SF = MSB of result, based on operand size
+        uint32_t sign_bit = (operand_size * 8) - 1;
+        value |= (result >> sign_bit) & 1 ? SF : 0;
 
-        // ZF = Result is zero
         value |= (result == 0) ? ZF : 0;
-
-        // PF = Parity of LSB
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
@@ -1734,6 +1735,48 @@ inline void X86_IDIV32(uint32_t divisor, X86Context& ctx)
 
     ctx.eax.u32 = static_cast<uint32_t>(static_cast<int32_t>(quotient));
     ctx.edx.u32 = static_cast<uint32_t>(static_cast<int32_t>(remainder));
+}
+
+inline void X86_SHR8(uint8_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint8_t temp = dst;
+    dst >>= count;
+    ctx.eflags.update_flags_shr(temp, count, dst, 1);
+}
+
+inline void X86_SHR16(uint16_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint16_t temp = dst;
+    dst >>= count;
+    ctx.eflags.update_flags_shr(temp, count, dst, 2);
+}
+
+inline void X86_SHR32(uint32_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint32_t temp = dst;
+    dst >>= count;
+    ctx.eflags.update_flags_shr(temp, count, dst, 4);
+}
+
+inline void X86_SHL8(uint8_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint8_t temp = dst;
+    dst <<= count;
+    ctx.eflags.update_flags_shl(temp, count, dst, 1);
+}
+
+inline void X86_SHL16(uint16_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint16_t temp = dst;
+    dst <<= count;
+    ctx.eflags.update_flags_shl(temp, count, dst, 2);
+}
+
+inline void X86_SHL32(uint32_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint32_t temp = dst;
+    dst <<= count;
+    ctx.eflags.update_flags_shl(temp, count, dst, 4);
 }
 
 #endif // X86_CONTEXT_H_INCLUDED
