@@ -25,7 +25,7 @@ const static ZydisMnemonic U64OP[] =
 const static ZydisMnemonic U32OP[] =
 {
     ZYDIS_MNEMONIC_ADC, ZYDIS_MNEMONIC_MOVSB, ZYDIS_MNEMONIC_MOVSW,
-    ZYDIS_MNEMONIC_CMPSD
+    ZYDIS_MNEMONIC_CMPSD, ZYDIS_MNEMONIC_CALL,
 };
 
 struct RecompilerLocalVariables

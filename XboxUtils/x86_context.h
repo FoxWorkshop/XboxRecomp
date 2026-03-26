@@ -782,27 +782,24 @@ struct X86EFlags
     }
 
     // Updates flags after SAR (Shift Arithmetic Right)
-    void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result) {
+    void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
+    {
+        uint32_t bit_width = operand_size * 8;
+
         clear_eflags();
 
-        // CF = Last bit shifted out (LSB before shift)
-        if (shift_count > 0) {
+        // CF = last bit shifted out (LSB side for SAR)
+        if (shift_count > 0 && shift_count <= bit_width)
+        {
             uint32_t last_shifted_out = (value_before >> (shift_count - 1)) & 1;
-            value |= (last_shifted_out) ? CF : 0;
+            value |= last_shifted_out ? CF : 0;
         }
 
-
-        value &= ~OF;
-
-        // SF = MSB of result
-        value |= (result >> 31) ? SF : 0;
-
-        // ZF = Result is zero
         value |= (result == 0) ? ZF : 0;
-
-        // PF = Parity of LSB
+        uint32_t sign_bit = bit_width - 1;
+        value |= (result >> sign_bit) & 1 ? SF : 0;
         uint8_t lsb = result & 0xFF;
-        value |= (__builtin_popcount(lsb) % 2 == 0 ? PF : 0);
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
     // Updates flags after ROL (Rotate Left)
@@ -1234,6 +1231,16 @@ struct X86Context
 
     uint32_t mxcsr = 0x1F80;
     X87FPU fpu;
+
+    void AddEsp(uint8_t count)
+    {
+        esp.u32 += (4 * count);
+    }
+
+    void SubEsp(uint8_t count)
+    {
+        esp.u32 -= (4 * count);
+    }
 
     void set_mxcsr(uint32_t value)
     {
@@ -1738,6 +1745,51 @@ inline void X86_IDIV32(uint32_t divisor, X86Context& ctx)
     ctx.edx.u32 = static_cast<uint32_t>(static_cast<int32_t>(remainder));
 }
 
+inline void X86_SAR8(uint8_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = static_cast<uint8_t>(static_cast<int8_t>(dst) >> (count & 0x1F));
+    ctx.eflags.update_flags_sar(orig, count, dst, 1);
+}
+
+inline void X86_SAR16(uint16_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = static_cast<uint16_t>(static_cast<int16_t>(dst) >> (count & 0x1F));
+    ctx.eflags.update_flags_sar(orig, count, dst, 2);
+}
+
+inline void X86_SAR32(uint32_t& dst, const uint8_t count, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = static_cast<uint32_t>(static_cast<int32_t>(dst) >> (count & 0x1F));
+    ctx.eflags.update_flags_sar(orig, count, dst, 4);
+}
+
+inline void X86_SAR8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = static_cast<uint8_t>(static_cast<int8_t>(orig) >> (count & 0x1F));
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_sar(orig, count, res, 1);
+}
+
+inline void X86_SAR16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = static_cast<uint16_t>(static_cast<int16_t>(orig) >> (count & 0x1F));
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_sar(orig, count, res, 2);
+}
+
+inline void X86_SAR32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = static_cast<uint32_t>(static_cast<int32_t>(orig) >> (count & 0x1F));
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_sar(orig, count, res, 4);
+}
+
 inline void X86_SHR8(uint8_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint8_t temp = dst;
@@ -2012,4 +2064,69 @@ inline void X86_NEG_U8_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
     ctx.eflags.update_flags_neg_U8(orig, res);
 }
 
+
+inline void X86_IMUL_EAX_U8(uint8_t src, X86Context& ctx)
+{
+    int16_t result = static_cast<int16_t>(static_cast<int8_t>(ctx.eax.u8_lo))
+        * static_cast<int16_t>(static_cast<int8_t>(src));
+    ctx.eax.u16 = static_cast<uint16_t>(result);
+    // OF/CF set if result doesn't fit in 8 bits
+    const bool overflow = (result < INT8_MIN || result > INT8_MAX);
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
+
+inline void X86_IMUL_EAX_U16(uint16_t src, X86Context& ctx)
+{
+    int32_t result = static_cast<int32_t>(static_cast<int16_t>(ctx.eax.u16))
+        * static_cast<int32_t>(static_cast<int16_t>(src));
+    ctx.eax.u16 = static_cast<uint16_t>(result & 0xFFFF);
+    ctx.edx.u16 = static_cast<uint16_t>(static_cast<uint32_t>(result) >> 16);
+    const bool overflow = (static_cast<int16_t>(ctx.edx.u16) != (static_cast<int16_t>(ctx.eax.u16) >> 15));
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
+
+inline void X86_IMUL_EAX_U32(uint32_t src, X86Context& ctx)
+{
+    int64_t result = static_cast<int64_t>(static_cast<int32_t>(ctx.eax.u32))
+        * static_cast<int64_t>(static_cast<int32_t>(src));
+    ctx.eax.u32 = static_cast<uint32_t>(result & 0xFFFFFFFFULL);
+    ctx.edx.u32 = static_cast<uint32_t>(static_cast<uint64_t>(result) >> 32);
+    const bool overflow = (static_cast<int32_t>(ctx.edx.u32) != (static_cast<int32_t>(ctx.eax.u32) >> 31));
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
+
+
+inline void X86_IMUL_U8(uint8_t& dst, uint8_t lhs, uint8_t rhs, X86Context& ctx)
+{
+    int16_t result = static_cast<int16_t>(static_cast<int8_t>(lhs))
+        * static_cast<int16_t>(static_cast<int8_t>(rhs));
+    dst = static_cast<uint8_t>(result);
+    const bool overflow = (result < INT8_MIN || result > INT8_MAX);
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
+
+inline void X86_IMUL_U16(uint16_t& dst, uint16_t lhs, uint16_t rhs, X86Context& ctx)
+{
+    int32_t result = static_cast<int32_t>(static_cast<int16_t>(lhs))
+        * static_cast<int32_t>(static_cast<int16_t>(rhs));
+    dst = static_cast<uint16_t>(result);
+    const bool overflow = (result < INT16_MIN || result > INT16_MAX);
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
+
+inline void X86_IMUL_U32(uint32_t& dst, uint32_t lhs, uint32_t rhs, X86Context& ctx)
+{
+    int64_t result = static_cast<int64_t>(static_cast<int32_t>(lhs))
+        * static_cast<int64_t>(static_cast<int32_t>(rhs));
+
+    dst = static_cast<uint32_t>(result);
+    const bool overflow = (result < INT32_MIN || result > INT32_MAX);
+    ctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF))
+        | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
+}
 #endif // X86_CONTEXT_H_INCLUDED

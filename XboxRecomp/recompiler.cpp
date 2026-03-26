@@ -2852,13 +2852,13 @@ bool Recompiler::Recompile(
             // Direct call (relative offset)
             if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
             {
-                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
+                println("\tctx.SubEsp(1); //Adjust stack pointer for call instruction"); //in x86, the cpu always adjust the stack pointer by 4 bytes regardless of call convention
                 uint32_t targetAddress = base + insn.insn.length + insn.operands[0].imm.value.s;
                 int res = printFunctionCallAddr(targetAddress);
 
                 if (!res)
                 {
-                    println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
+                    println("\tctx.AddEsp(1); //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
                     println("\tprintf(\"MISSING FUNCTION CALL: {:X} at {:X}\\n\");", targetAddress, base);
                 }
             }
@@ -2869,33 +2869,33 @@ bool Recompiler::Recompile(
                 const auto callDst = ResolveKernelCall(targetAddress);
                 if (callDst)
                 {
-                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
+                    println("\tctx.SubEsp(1); //Adjust stack pointer for call instruction");
                     int res = printFunctionCallAddr(targetAddress);
                     if (!res)
-                        println("\tctx.esp.u32 += 0x4; //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
+                        println("\tctx.AddEsp(1); //function wasn't found, reAdjust stack pointer TODO FIX!!!!!");
                 }
                 else
                 {
                     // Indirect call (memory operand)
-                    println("\tauto ptr_{} = X86_LOAD_U32({});", base, ea(insn.operands[0]));
-                    println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
-                    println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
+                    println("\tvalUint320 = X86_LOAD_U32({});", ea(insn.operands[0]));
+                    println("\tctx.SubEsp(1); //Adjust stack pointer for call instruction");
+                    println("\tX86_CALL_INDIRECT_FUNC(valUint320);");
                 }
             }
             else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tauto ptr_{} = " + get_x86_reg(insn.operands[0].reg.value) + ";", base);
+                println("\tvalUint320 = " + get_x86_reg(insn.operands[0].reg.value) + ";", base);
 
                 // Register indirect (call eax)
                 if (funcConfig.isRegKernelAddr)
                 {
-                    println("\tif (ptr_{} >=  0x80000001 && ptr_{} <= 0x80000360) {{", base, base);
-                    println("\t\tptr_{} = 0x{:X};", base, funcConfig.RegisterKernelAddr);
+                    println("\tif (valUint320 >=  0x80000001 && valUint320 <= 0x80000360) {{");
+                    println("\t\tvalUint320 = 0x{:X};", funcConfig.RegisterKernelAddr);
                     println("\t}}");
                 }
 
-                println("\tctx.esp.u32 -= 0x4; //Adjust stack pointer for call instruction");
-                println("\tX86_CALL_INDIRECT_FUNC(ptr_{});", base);
+                println("\tctx.SubEsp(1); //Adjust stack pointer for call instruction");
+                println("\tX86_CALL_INDIRECT_FUNC(valUint320);");
             }
         }
     }
@@ -4203,43 +4203,8 @@ bool Recompiler::Recompile(
                     throw std::runtime_error("Unsupported operand in IMUL");
             };
 
-
-        // Helper function to generate overflow check based on operand size
-        auto generate_overflow_check = [&](const std::string& temp_result, int operand_size) -> std::string
-            {
-                switch (operand_size) {
-                case 8:
-                    return fmt::format("(({} < INT8_MIN || {} > INT8_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
-                        temp_result, temp_result);
-                case 16:
-                    return fmt::format("(({} < INT16_MIN || {} > INT16_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
-                        temp_result, temp_result);
-                case 32:
-                    return fmt::format("(({} < INT32_MIN || {} > INT32_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0)",
-                        temp_result, temp_result);
-                case 64:
-                    // For 64-bit, we need to check if the result fits in the signed range
-                    // This is more complex and would need 128-bit arithmetic
-                    return fmt::format("((static_cast<uint64_t>({}) > static_cast<uint64_t>(INT64_MAX) && "
-                        "static_cast<uint64_t>({}) < static_cast<uint64_t>(INT64_MIN)) ? "
-                        "(X86EFlags::CF | X86EFlags::OF) : 0)", temp_result, temp_result);
-                default:
-                    throw std::runtime_error(fmt::format("Unsupported operand size: {} bits", operand_size));
-                }
-            };
-
-        // First, classify the actual IMUL form we're dealing with
-        enum ImulForm {
-            IMUL_UNKNOWN,
-            IMUL_EAX_EDX,      // Single operand: EDX:EAX = EAX * op
-            IMUL_REG_REG,      // Two operands: reg1 = reg1 * reg2/mem
-            IMUL_REG_IMM,      // Two operands: reg1 = reg1 * imm
-            IMUL_REG_REG_IMM    // Three operands: reg1 = reg2/mem * imm
-        } form = IMUL_UNKNOWN;
-
-        // Count actual meaningful operands (ignore implicit ones)
-        //fix a bug with zydis detecting more than 3 operands
         int explicit_operands = 0;
+
         for (size_t i = 0; i < insn.insn.operand_count; ++i)
         {
             if (insn.operands[i].visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT)
@@ -4248,171 +4213,50 @@ bool Recompiler::Recompile(
 
         if (explicit_operands == 1)
         {
-            form = IMUL_EAX_EDX;
+            //Form 1: EAX * r/m -> EDX:EAX
+            const auto& src = insn.operands[0];
+            std::string rhs = get_operand_str(src);
+            if (src.size == 8)
+                println("\tX86_IMUL_EAX_U8(static_cast<uint8_t>({}), ctx);", rhs);
+            else if (src.size == 16)
+                println("\tX86_IMUL_EAX_U16(static_cast<uint16_t>({}), ctx);", rhs);
+            else if (src.size == 32)
+                println("\tX86_IMUL_EAX_U32(static_cast<uint32_t>({}), ctx);", rhs);
         }
         else if (explicit_operands == 2)
         {
-            if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
-            {
-                form = IMUL_REG_IMM;
-            }
-            else {
-                form = IMUL_REG_REG;
-            }
+            // Form 2/3: dst = dst * r/m  OR  dst = dst * imm
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            std::string dst_str = get_x86_reg(dst.reg.value);
+            std::string rhs = get_operand_str(src);
+            if (dst.size == 8)
+                println("\tX86_IMUL_U8({}, {}, static_cast<uint8_t>({}), ctx);", dst_str, dst_str, rhs);
+            else if (dst.size == 16)
+                println("\tX86_IMUL_U16({}, {}, static_cast<uint16_t>({}), ctx);", dst_str, dst_str, rhs);
+            else if (dst.size == 32)
+                println("\tX86_IMUL_U32({}, {}, static_cast<uint32_t>({}), ctx);", dst_str, dst_str, rhs);
         }
         else if (explicit_operands == 3)
         {
-            form = IMUL_REG_REG_IMM;
-        }
-
-        // Now handle each form
-        switch (form)
-        {
-        case IMUL_EAX_EDX:
-        {
-            // IMUL r/m - EDX:EAX = EAX * r/m
-            const auto& src = insn.operands[0];
-            std::string rhs = get_operand_str(src);
-            std::string temp_result = fmt::format("imul_result_{:X}", base);
-            int operand_size = src.size;
-
-            if (operand_size == 32) {
-                // 32-bit * 32-bit = 64-bit result
-                println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>(ctx.eax.u32)) * "
-                    "static_cast<int64_t>(static_cast<int32_t>({}));", temp_result, rhs);
-                println("\tctx.eax.u32 = static_cast<uint32_t>({} & 0xFFFFFFFFULL);", temp_result);
-                println("\tctx.edx.u32 = static_cast<uint32_t>(static_cast<uint64_t>({}) >> 32);", temp_result);
-                // For EAX*EDX form, overflow occurs when high part (EDX) is not sign extension of low part (EAX)
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "((static_cast<int32_t>(ctx.edx.u32) != (static_cast<int32_t>(ctx.eax.u32) >> 31)) ? "
-                    "(X86EFlags::CF | X86EFlags::OF) : 0);");
-            }
-            else if (operand_size == 16) {
-                // 16-bit * 16-bit = 32-bit result (AX * op -> DX:AX)
-                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>(ctx.eax.u16)) * "
-                    "static_cast<int32_t>(static_cast<int16_t>({}));", temp_result, rhs);
-                println("\tctx.eax.u16 = static_cast<uint16_t>({} & 0xFFFF);", temp_result);
-                println("\tctx.edx.u16 = static_cast<uint16_t>(static_cast<uint32_t>({}) >> 16);", temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "((static_cast<int16_t>(ctx.edx.u16) != (static_cast<int16_t>(ctx.eax.u16) >> 15)) ? "
-                    "(X86EFlags::CF | X86EFlags::OF) : 0);");
-            }
-            else if (operand_size == 8) {
-                // 8-bit * 8-bit = 16-bit result (AL * op -> AX)
-                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>(ctx.eax.u8_lo)) * "
-                    "static_cast<int16_t>(static_cast<int8_t>({}));", temp_result, rhs);
-                println("\tctx.eax.u16 = static_cast<uint16_t>({});", temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "(({} < INT8_MIN || {} > INT8_MAX) ? (X86EFlags::CF | X86EFlags::OF) : 0);",
-                    temp_result, temp_result);
-            }
-            break;
-        }
-        case IMUL_REG_REG:
-        {
-            // IMUL r, r/m - r1 = r1 * r2/mem
-            const auto& dst = insn.operands[0];
-            const auto& src = insn.operands[1];
-            std::string lhs = get_x86_reg(dst.reg.value);
-            std::string rhs = get_operand_str(src);
-            std::string temp_result = fmt::format("imul_result_{:X}", base);
-            int operand_size = dst.size;
-
-            if (operand_size == 32) {
-                println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
-                    "static_cast<int64_t>(static_cast<int32_t>({}));", temp_result, lhs, rhs);
-                println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 32));
-            }
-            else if (operand_size == 16) {
-                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
-                    "static_cast<int32_t>(static_cast<int16_t>({}));", temp_result, lhs, rhs);
-                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 16));
-            }
-            else if (operand_size == 8) {
-                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
-                    "static_cast<int16_t>(static_cast<int8_t>({}));", temp_result, lhs, rhs);
-                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 8));
-            }
-            break;
-        }
-
-        case IMUL_REG_IMM: {
-            // IMUL r, imm - r = r * imm
-            const auto& dst = insn.operands[0];
-            const auto& imm = insn.operands[1];
-            std::string lhs = get_x86_reg(dst.reg.value);
-            std::string imm_str = get_operand_str(imm);
-            std::string temp_result = fmt::format("imul_result_{:X}", base);
-            int operand_size = dst.size;
-
-            if (operand_size == 32) {
-                println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
-                    "static_cast<int64_t>({});", temp_result, lhs, imm_str);
-                println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 32));
-            }
-            else if (operand_size == 16) {
-                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
-                    "static_cast<int32_t>({});", temp_result, lhs, imm_str);
-                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 16));
-            }
-            else if (operand_size == 8) {
-                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
-                    "static_cast<int16_t>({});", temp_result, lhs, imm_str);
-                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 8));
-            }
-            break;
-        }
-
-        case IMUL_REG_REG_IMM: {
-            // IMUL r, r/m, imm - r = r/m * imm
+            // Form 4: dst = src * imm
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
             const auto& imm = insn.operands[2];
-            std::string lhs = get_x86_reg(dst.reg.value);
+            std::string dst_str = get_x86_reg(dst.reg.value);
             std::string rhs = get_operand_str(src);
             std::string imm_str = get_operand_str(imm);
-            std::string temp_result = fmt::format("imul_result_{:X}", base);
-            int operand_size = dst.size;
 
-            if (operand_size == 32) {
-                println("\tint64_t {} = static_cast<int64_t>(static_cast<int32_t>({})) * "
-                    "static_cast<int64_t>({});", temp_result, rhs, imm_str);
-                println("\t{} = static_cast<uint32_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 32));
-            }
-            else if (operand_size == 16) {
-                println("\tint32_t {} = static_cast<int32_t>(static_cast<int16_t>({})) * "
-                    "static_cast<int32_t>({});", temp_result, rhs, imm_str);
-                println("\t{} = static_cast<uint16_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 16));
-            }
-            else if (operand_size == 8) {
-                println("\tint16_t {} = static_cast<int16_t>(static_cast<int8_t>({})) * "
-                    "static_cast<int16_t>({});", temp_result, rhs, imm_str);
-                println("\t{} = static_cast<uint8_t>({});", lhs, temp_result);
-                println("\tctx.eflags.value = (ctx.eflags.value & ~(X86EFlags::CF | X86EFlags::OF)) | "
-                    "{};", generate_overflow_check(temp_result, 8));
-            }
-            break;
+            if (dst.size == 8)
+                println("\tX86_IMUL_U8({}, static_cast<uint8_t>({}), static_cast<uint8_t>({}), ctx);", dst_str, rhs, imm_str);
+            else if (dst.size == 16)
+                println("\tX86_IMUL_U16({}, static_cast<uint16_t>({}), static_cast<uint16_t>({}), ctx);", dst_str, rhs, imm_str);
+            else if (dst.size == 32)
+                println("\tX86_IMUL_U32({}, static_cast<uint32_t>({}), static_cast<uint32_t>({}), ctx);", dst_str, rhs, imm_str);
         }
-
-        default:
-            throw std::runtime_error(fmt::format("Unsupported IMUL form with {} explicit operands",
-                explicit_operands));
+        else
+        {
+            throw std::runtime_error(fmt::format("Unsupported IMUL form with {} explicit operands", explicit_operands));
         }
     }
     break;
@@ -4821,108 +4665,28 @@ bool Recompiler::Recompile(
         {
             const auto& dst = insn.operands[0];
             const char* size_suffix = GetOperandSizeName(dst.size);
-            std::string temp = "temp_" + std::to_string(base);
 
-            // SAR reg/mem, imm
-            if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+            std::string count_str = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                ? std::to_string(insn.operands[1].imm.value.u)
+                : "ctx.ecx.u8_lo";
+
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                uint32_t shift_count = insn.operands[1].imm.value.u;
-
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    // Store original value before shift
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-
-                    // Perform arithmetic right shift using signed cast
-                    // Cast to signed type, shift, then cast back to preserve the union behavior
-                    if (dst.size == 32) {
-                        println("\t{} = static_cast<uint32_t>(static_cast<int32_t>({}) >> {});",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_count);
-                    }
-                    else if (dst.size == 16) {
-                        println("\t{} = static_cast<uint16_t>(static_cast<int16_t>({}) >> {});",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_count);
-                    }
-                    else if (dst.size == 8) {
-                        println("\t{} = static_cast<uint8_t>(static_cast<int8_t>({}) >> {});",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_count);
-                    }
-
-                    // Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_sar({}, {}, {});", temp, shift_count, get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    // Load original value
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-
-                    // Perform arithmetic right shift and store
-                    if (dst.size == 32) {
-                        println("\tX86_STORE_{}({}, static_cast<uint32_t>(static_cast<int32_t>({}) >> {}));",
-                            size_suffix, ea(dst), temp, shift_count);
-                    }
-                    else if (dst.size == 16) {
-                        println("\tX86_STORE_{}({}, static_cast<uint16_t>(static_cast<int16_t>({}) >> {}));",
-                            size_suffix, ea(dst), temp, shift_count);
-                    }
-                    else if (dst.size == 8) {
-                        println("\tX86_STORE_{}({}, static_cast<uint8_t>(static_cast<int8_t>({}) >> {}));",
-                            size_suffix, ea(dst), temp, shift_count);
-                    }
-
-                    // Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_sar({}, {}, X86_LOAD_{}({}));",
-                        temp, shift_count, size_suffix, ea(dst));
-                }
+                if (dst.size == 8)       
+                    println("\tX86_SAR8({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SAR16({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 32) 
+                    println("\tX86_SAR32({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
             }
-            // SAR reg/mem, CL
-            else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-                insn.operands[1].reg.value == ZYDIS_REGISTER_CL)
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                {
-                    // Store original value before shift
-                    println("\tauto {} = {};", temp, get_x86_reg(dst.reg.value));
-
-                    // Perform arithmetic right shift using signed cast
-                    if (dst.size == 32) {
-                        println("\t{} = static_cast<uint32_t>(static_cast<int32_t>({}) >> ctx.ecx.u8_lo);",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
-                    }
-                    else if (dst.size == 16) {
-                        println("\t{} = static_cast<uint16_t>(static_cast<int16_t>({}) >> ctx.ecx.u8_lo);",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
-                    }
-                    else if (dst.size == 8) {
-                        println("\t{} = static_cast<uint8_t>(static_cast<int8_t>({}) >> ctx.ecx.u8_lo);",
-                            get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value));
-                    }
-
-                    // Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_sar({}, ctx.ecx.u8_lo, {});", temp, get_x86_reg(dst.reg.value));
-                }
-                else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-                {
-                    // Load original value
-                    println("\tauto {} = X86_LOAD_{}({});", temp, size_suffix, ea(dst));
-
-                    // Perform arithmetic right shift and store
-                    if (dst.size == 32) {
-                        println("\tX86_STORE_{}({}, static_cast<uint32_t>(static_cast<int32_t>({}) >> ctx.ecx.u8_lo));",
-                            size_suffix, ea(dst), temp);
-                    }
-                    else if (dst.size == 16) {
-                        println("\tX86_STORE_{}({}, static_cast<uint16_t>(static_cast<int16_t>({}) >> ctx.ecx.u8_lo));",
-                            size_suffix, ea(dst), temp);
-                    }
-                    else if (dst.size == 8) {
-                        println("\tX86_STORE_{}({}, static_cast<uint8_t>(static_cast<int8_t>({}) >> ctx.ecx.u8_lo));",
-                            size_suffix, ea(dst), temp);
-                    }
-
-                    // Update flags (original value, shift count, result)
-                    println("\tctx.eflags.update_flags_sar({}, ctx.ecx.u8_lo, X86_LOAD_{}({}));", temp, size_suffix, ea(dst));
-                }
+                if (dst.size == 8)       
+                    println("\tX86_SAR8_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SAR16_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 32)
+                    println("\tX86_SAR32_MEM({}, {}, ctx, base);", ea(dst), count_str);
             }
         }
         break;
