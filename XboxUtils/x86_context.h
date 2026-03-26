@@ -611,7 +611,7 @@ struct X86EFlags
 
         // Other flags
         value |= (result == 0) ? X86EFlags::ZF : 0;
-        value |= (result & X86EFlags::SF);
+        value |= (result & 0x80000000) ? X86EFlags::SF : 0;
 
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? X86EFlags::PF : 0;
@@ -1965,6 +1965,51 @@ inline void X86_DEC8_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
     uint8_t res = orig - 1;
     X86_STORE_U8(addr, res);
     ctx.eflags.update_flags_dec_U8(orig, res);
+}
+
+inline void X86_NEG_U32(uint32_t& dst, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = -orig;
+    ctx.eflags.update_flags_neg_U32(orig, dst);
+}
+
+inline void X86_NEG_U32_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = -orig;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_neg_U16(orig, res);
+}
+
+inline void X86_NEG_U16(uint16_t &dst, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = -orig;
+    ctx.eflags.update_flags_neg_U16(orig, dst);
+}
+
+inline void X86_NEG_U16_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = -orig;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_neg_U16(orig, res);
+}
+
+inline void X86_NEG_U8(uint8_t& dst, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = -orig;
+    ctx.eflags.update_flags_neg_U8(orig, dst);
+}
+
+inline void X86_NEG_U8_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = -orig;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_neg_U8(orig, res);
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

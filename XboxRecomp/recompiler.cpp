@@ -5744,22 +5744,11 @@ bool Recompiler::Recompile(
 
             if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                std::string reg = get_x86_reg(op.reg.value);
-                std::string temp_old = get_temp_reg(op.size) + "_OLD";
-
-                println("\tauto {} = {};", temp_old, reg);
-                println("\t{} = -{};", reg, reg);
-                println("\tctx.eflags.update_flags_neg_{}({}, {});", size_suffix, temp_old, reg);
+                println("\tX86_NEG_{}({}, ctx);", size_suffix, get_x86_reg(op.reg.value));
             }
             else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                std::string temp_old = get_temp_reg(op.size) + "_OLD";
-                std::string temp_res = get_temp_reg(op.size) + "_RES";
-
-                println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(op));
-                println("\tauto {} = -{};", temp_res, temp_old);
-                println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                println("\tctx.eflags.update_flags_neg_{}({}, {});", size_suffix, temp_old, temp_res);
+                println("\tX86_NEG_{}_MEM({}, ctx, base);", size_suffix, ea(op));
             }
         }
         break;
