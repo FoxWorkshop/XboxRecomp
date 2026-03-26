@@ -500,7 +500,7 @@ struct X86EFlags
         value |= (old_val == 0x7FFFFFFF) ? OF : 0;
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
-        value |= ((result & 0x0F) == 0) ? AF : 0;
+        value |= ((old_val & 0x0F) == 0x0F) ? AF : 0;
     }
 
     void update_flags_inc_U16(uint16_t old_val, uint16_t result)
@@ -515,7 +515,7 @@ struct X86EFlags
         value |= (old_val == 0x7FFF) ? OF : 0;
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
-        value |= ((result & 0x0F) == 0) ? AF : 0;
+        value |= ((old_val & 0x0F) == 0x0F) ? AF : 0;
     }
 
     void update_flags_inc_U8(uint8_t old_val, uint8_t result)
@@ -528,8 +528,9 @@ struct X86EFlags
         value |= (result & 0x80) ? SF : 0;  // Sign flag for 8-bit (bit 7)
         // Overflow Flag (only if 0x7F -> 0x80)
         value |= (old_val == 0x7F) ? OF : 0;
-        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
-        value |= ((result & 0x0F) == 0) ? AF : 0;
+        uint8_t lsb = result & 0xFF;
+        value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
+        value |= ((old_val & 0x0F) == 0x0F) ? AF : 0;
     }
 
     void update_flags_dec_U32(uint32_t old_val, uint32_t result)
@@ -555,7 +556,7 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
 
         // Auxiliary Flag
-        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+        value |= ((old_val & 0x0F) == 0x0) ? AF : 0;
     }
 
     void update_flags_dec_U16(uint16_t old_val, uint16_t result)
@@ -576,7 +577,7 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
 
         // Auxiliary Flag
-        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+        value |= ((old_val & 0x0F) == 0x0) ? AF : 0;
     }
 
     void update_flags_dec_U8(uint8_t old_val, uint8_t result)
@@ -597,7 +598,7 @@ struct X86EFlags
         value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
 
         // Auxiliary Flag
-        value |= ((result & 0x0F) == 0x0F) ? AF : 0;
+        value |= ((old_val & 0x0F) == 0x0) ? AF : 0;
     }
 
     void update_flags_neg_U32(uint32_t original_value, uint32_t result)
@@ -1777,6 +1778,193 @@ inline void X86_SHL32(uint32_t& dst, const uint8_t count, X86Context& ctx)
     uint32_t temp = dst;
     dst <<= count;
     ctx.eflags.update_flags_shl(temp, count, dst, 4);
+}
+
+// reg destination, address type must match union type of CTX
+inline void X86_SUB32(uint32_t& dst, uint32_t src, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = orig - src;
+    ctx.eflags.update_flags_sub_U32(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_SUB32_MEM(uint32_t addr, uint32_t src, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig - src;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_sub_U32(orig, src, res);
+}
+
+inline void X86_SUB16(uint16_t& dst, uint16_t src, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = orig - src;
+    ctx.eflags.update_flags_sub_U16(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_SUB16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig - src;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_sub_U16(orig, src, res);
+}
+
+inline void X86_SUB8(uint8_t& dst, uint8_t src, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = orig - src;
+    ctx.eflags.update_flags_sub_U8(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_SUB8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig - src;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_sub_U8(orig, src, res);
+}
+
+inline void X86_ADD32(uint32_t& dst, uint32_t src, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = orig + src;
+    ctx.eflags.update_flags_add_U32(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_ADD32_MEM(uint32_t addr, uint32_t src, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig + src;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_add_U32(orig, src, res);
+}
+
+inline void X86_ADD16(uint16_t& dst, uint16_t src, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = orig + src;
+    ctx.eflags.update_flags_add_U16(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_ADD16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig + src;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_add_U16(orig, src, res);
+}
+
+inline void X86_ADD8(uint8_t& dst, uint8_t src, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = orig + src;
+    ctx.eflags.update_flags_add_U8(orig, src, dst);
+}
+
+// mem destination, need base parameter for store macro.
+inline void X86_ADD8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig + src;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_add_U8(orig, src, res);
+}
+
+inline void X86_INC32(uint32_t& dst, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = orig + 1;
+    ctx.eflags.update_flags_inc_U32(orig, dst);
+}
+
+inline void X86_INC32_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig + 1;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_inc_U32(orig, res);
+}
+
+inline void X86_INC16(uint16_t& dst, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = orig + 1;
+    ctx.eflags.update_flags_inc_U16(orig, dst);
+}
+
+inline void X86_INC16_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig + 1;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_inc_U16(orig, res);
+}
+
+inline void X86_INC8(uint8_t& dst, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = orig + 1;
+    ctx.eflags.update_flags_inc_U8(orig, dst);
+}
+
+inline void X86_INC8_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig + 1;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_inc_U8(orig, res);
+}
+
+inline void X86_DEC32(uint32_t& dst, X86Context& ctx)
+{
+    uint32_t orig = dst;
+    dst = orig - 1;
+    ctx.eflags.update_flags_dec_U32(orig, dst);
+}
+
+inline void X86_DEC32_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig - 1;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_dec_U32(orig, res);
+}
+
+inline void X86_DEC16(uint16_t& dst, X86Context& ctx)
+{
+    uint16_t orig = dst;
+    dst = orig - 1;
+    ctx.eflags.update_flags_dec_U16(orig, dst);
+}
+
+inline void X86_DEC16_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig - 1;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_dec_U16(orig, res);
+}
+
+inline void X86_DEC8(uint8_t& dst, X86Context& ctx)
+{
+    uint8_t orig = dst;
+    dst = orig - 1;
+    ctx.eflags.update_flags_dec_U8(orig, dst);
+}
+
+inline void X86_DEC8_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig - 1;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_dec_U8(orig, res);
 }
 
 #endif // X86_CONTEXT_H_INCLUDED

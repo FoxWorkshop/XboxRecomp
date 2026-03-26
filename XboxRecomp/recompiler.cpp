@@ -3981,54 +3981,32 @@ bool Recompiler::Recompile(
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
-            {
-                std::string temp_old = get_temp_reg(dst.size) + "_OLD";
-                std::string temp_src = get_temp_reg(dst.size) + "_SRC";
-                std::string temp_res = get_temp_reg(dst.size) + "_RES";
-
-                // Load destination value
-                println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(dst));
-
-                // Load source value into a temporary variable
-                if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                    println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                    println("\tauto {} = {};", temp_src, src.imm.value.u);
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                    println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
-                }
-
-
-                println("\tauto {} = {} + {};", temp_res, temp_old, temp_src);
-                println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
-                println("\tctx.eflags.update_flags_add_{}({}, {}, {});", size_suffix, temp_old, temp_src, temp_res);
-            }
+            // Resolve source
+            std::string src_str;
+            if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                src_str = std::to_string((int)src.imm.value.u);
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                src_str = fmt::format("X86_LOAD_{}({})", size_suffix, ea(src));
             else
-            { // Register destination
-                std::string dst_reg = get_x86_reg(dst.reg.value);
-                std::string temp_old = get_temp_reg(dst.size) + "_OLD";
-                std::string temp_src = get_temp_reg(dst.size) + "_SRC";
+                src_str = get_x86_reg(src.reg.value);
 
-                // Save original destination value
-                println("\tauto {} = {};", temp_old, dst_reg);
-
-                // Get source value
-                if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                    println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                    println("\tauto {} = {};", temp_src, src.imm.value.u);
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                    println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
-                }
-
-                // Perform the addition
-                println("\t{} = {} + {};", dst_reg, temp_old, temp_src);
-                println("\tctx.eflags.update_flags_add_{}({}, {}, {});", size_suffix, temp_old, temp_src, dst_reg);
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dst.size == 8)
+                    println("\tX86_ADD8({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
+                else if (dst.size == 16)
+                    println("\tX86_ADD16({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
+                else if (dst.size == 32)
+                    println("\tX86_ADD32({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dst.size == 8)
+                    println("\tX86_ADD8_MEM({}, {}, ctx, base);", ea(dst), src_str);
+                else if (dst.size == 16)
+                    println("\tX86_ADD16_MEM({}, {}, ctx, base);", ea(dst), src_str);
+                else if (dst.size == 32)
+                    println("\tX86_ADD32_MEM({}, {}, ctx, base);", ea(dst), src_str);
             }
         }
         break;
@@ -4042,58 +4020,32 @@ bool Recompiler::Recompile(
             const auto& src = insn.operands[1];
             const char* size_suffix = GetOperandSizeName(dst.size);
 
-            if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                std::string temp_old = get_temp_reg(dst.size) + "_OLD";
-                std::string temp_src = get_temp_reg(dst.size) + "_SRC";
-                std::string temp_res = get_temp_reg(dst.size) + "_RES";
+            // Resolve source
+            std::string src_str;
+            if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                src_str = std::to_string((int)src.imm.value.u);
+            else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+                src_str = fmt::format("X86_LOAD_{}({})", size_suffix, ea(src));
+            else
+                src_str = get_x86_reg(src.reg.value);
 
-                // Load destination value
-                println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(dst));
-
-                // Load source value into a temporary variable
-                if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                    println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                    println("\tauto {} = {};", temp_src, src.imm.value.u);
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                    println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
-                }
-
-                // Calculate result
-                println("\tauto {} = {} - {};", temp_res, temp_old, temp_src);
-
-                // Store result
-                println("\tX86_STORE_{}({}, {});", size_suffix, ea(dst), temp_res);
-
-                // Update flags properly
-                println("\tctx.eflags.update_flags_sub_{}({}, {}, {});", size_suffix, temp_old, temp_src, temp_res);
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dst.size == 8)       
+                    println("\tX86_SUB8({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SUB16({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
+                else if (dst.size == 32) 
+                    println("\tX86_SUB32({}, {}, ctx);", get_x86_reg(dst.reg.value), src_str);
             }
-            else { // Register destination
-                std::string dst_reg = get_x86_reg(dst.reg.value);
-                std::string temp_old = get_temp_reg(dst.size) + "_OLD";
-                std::string temp_src = get_temp_reg(dst.size) + "_SRC";
-
-                // Save original destination value
-                println("\tauto {} = {};", temp_old, dst_reg);
-
-                // Get source value
-                if (src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                    println("\tauto {} = {};", temp_src, get_x86_reg(src.reg.value));
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                    println("\tauto {} = {};", temp_src, src.imm.value.u);
-                }
-                else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                    println("\tauto {} = X86_LOAD_{}({});", temp_src, size_suffix, ea(src));
-                }
-
-                // Perform the subtraction
-                println("\t{} = {} - {};", dst_reg, temp_old, temp_src);
-
-                // Update flags properly
-                println("\tctx.eflags.update_flags_sub_{}({}, {}, {});", size_suffix, temp_old, temp_src, dst_reg);
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dst.size == 8)       
+                    println("\tX86_SUB8_MEM({}, {}, ctx, base);", ea(dst), src_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SUB16_MEM({}, {}, ctx, base);", ea(dst), src_str);
+                else if (dst.size == 32) 
+                    println("\tX86_SUB32_MEM({}, {}, ctx, base);", ea(dst), src_str);
             }
         }
         break;
@@ -4496,25 +4448,40 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_INC:
-        if (insn.insn.operand_count >= 1) {
-            const auto& op = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(op.size);
+        if (insn.insn.operand_count >= 1) 
+        {
+            const auto& dest = insn.operands[0];
 
-            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                std::string oldval = get_temp_reg(op.size);
-                println("\tauto {} = {};", oldval, get_x86_reg(op.reg.value));
-                println("\t{}++;", get_x86_reg(op.reg.value));
-                println("\tctx.eflags.update_flags_inc_{}({}, {});", size_suffix, oldval, get_x86_reg(op.reg.value));
+            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dest.size == 8)
+                {
+                    println("\tX86_INC8({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+                else if (dest.size == 16)
+                {
+                    println("\tX86_INC16({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+                else if (dest.size == 32)
+                {
+                    println("\tX86_INC32({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+
             }
-            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                std::string temp_old = get_temp_reg(op.size) + "_OLD";
-                std::string temp_res = get_temp_reg(op.size) + "_RES";
-
-                println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(op));
-                println("\tauto {} = {};", temp_res, temp_old);
-                println("\t{}++;", temp_res);
-                println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                println("\tctx.eflags.update_flags_inc_{}({}, {});", size_suffix, temp_old, temp_res);
+            else if (dest.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dest.size == 8)
+                {
+                    println("\tX86_INC8_MEM({}, ctx, base);", ea(dest));
+                }
+                else if (dest.size == 16)
+                {
+                    println("\tX86_INC16_MEM({}, ctx, base);", ea(dest));
+                }
+                else if (dest.size == 32)
+                {
+                    println("\tX86_INC32_MEM({}, ctx, base);", ea(dest));
+                }
             }
         }
         break;
@@ -4522,25 +4489,40 @@ bool Recompiler::Recompile(
         HandleSseScalarInstruction(insn, xmm, decode_memory_operand, "_mm_div_ss", base);
         break;
     case ZYDIS_MNEMONIC_DEC:
-        if (insn.insn.operand_count >= 1) {
-            const auto& op = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(op.size);
+        if (insn.insn.operand_count >= 1)
+        {
+            const auto& dest = insn.operands[0];
 
-            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                std::string oldval = get_temp_reg(op.size);
-                println("\tauto {} = {};", oldval, get_x86_reg(op.reg.value));
-                println("\t{}--;", get_x86_reg(op.reg.value));
-                println("\tctx.eflags.update_flags_dec_{}({}, {});", size_suffix, oldval, get_x86_reg(op.reg.value));
+            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dest.size == 8)
+                {
+                    println("\tX86_DEC8({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+                else if (dest.size == 16)
+                {
+                    println("\tX86_DEC16({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+                else if (dest.size == 32)
+                {
+                    println("\tX86_DEC32({}, ctx);", get_x86_reg(dest.reg.value));
+                }
+
             }
-            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY) {
-                std::string temp_old = get_temp_reg(op.size) + "_OLD";
-                std::string temp_res = get_temp_reg(op.size) + "_RES";
-
-                println("\tauto {} = X86_LOAD_{}({});", temp_old, size_suffix, ea(op));
-                println("\tauto {} = {};", temp_res, temp_old);
-                println("\t{}--;", temp_res);
-                println("\tX86_STORE_{}({}, {});", size_suffix, ea(op), temp_res);
-                println("\tctx.eflags.update_flags_dec_{}({}, {});", size_suffix, temp_old, temp_res);
+            else if (dest.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dest.size == 8)
+                {
+                    println("\tX86_DEC8_MEM({}, ctx, base);", ea(dest));
+                }
+                else if (dest.size == 16)
+                {
+                    println("\tX86_DEC16_MEM({}, ctx, base);", ea(dest));
+                }
+                else if (dest.size == 32)
+                {
+                    println("\tX86_DEC32_MEM({}, ctx, base);", ea(dest));
+                }
             }
         }
         break;
