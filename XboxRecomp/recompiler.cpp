@@ -5232,50 +5232,57 @@ bool Recompiler::Recompile(
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(dst.size);
 
-            // get destionation (reg or mem)
-            std::string dst_str = (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                ? get_x86_reg(dst.reg.value)
-                : fmt::format("*reinterpret_cast<uint{}_t*>({})", dst.size, ea(dst));
-
-            // Get count
             std::string count_str = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
                 ? std::to_string(insn.operands[1].imm.value.u)
                 : "ctx.ecx.u8_lo";
 
-
-            if (dst.size == 8)
-                println("\tX86_SHL8({}, {}, ctx);", dst_str, count_str);
-            else if (dst.size == 16)
-                println("\tX86_SHL16({}, {}, ctx);", dst_str, count_str);
-            else if (dst.size == 32)
-                println("\tX86_SHL32({}, {}, ctx);", dst_str, count_str);
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dst.size == 8)       
+                    println("\tX86_SHL8({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SHL16({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 32) 
+                    println("\tX86_SHL32({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dst.size == 8)       
+                    println("\tX86_SHL8_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 16) 
+                    println("\tX86_SHL16_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 32) 
+                    println("\tX86_SHL32_MEM({}, {}, ctx, base);", ea(dst), count_str);
+            }
         }
         break;
     case ZYDIS_MNEMONIC_SHR:
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
-            const char* size_suffix = GetOperandSizeName(dst.size);
-
-            // get destionation (reg or mem)
-            std::string dst_str = (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
-                ? get_x86_reg(dst.reg.value)
-                : fmt::format("*reinterpret_cast<uint{}_t*>({})", dst.size, ea(dst));
-
-            // Get count
             std::string count_str = (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
                 ? std::to_string(insn.operands[1].imm.value.u)
                 : "ctx.ecx.u8_lo";
 
-
-            if (dst.size == 8)
-                println("\tX86_SHR8({}, {}, ctx);", dst_str, count_str);
-            else if (dst.size == 16)
-                println("\tX86_SHR16({}, {}, ctx);", dst_str, count_str);
-            else if (dst.size == 32)
-                println("\tX86_SHR32({}, {}, ctx);", dst_str, count_str);
+            if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
+            {
+                if (dst.size == 8)
+                    println("\tX86_SHR8({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 16)
+                    println("\tX86_SHR16({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+                else if (dst.size == 32)
+                    println("\tX86_SHR32({}, {}, ctx);", get_x86_reg(dst.reg.value), count_str);
+            }
+            else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+                if (dst.size == 8)
+                    println("\tX86_SHR8_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 16)
+                    println("\tX86_SHR16_MEM({}, {}, ctx, base);", ea(dst), count_str);
+                else if (dst.size == 32)
+                    println("\tX86_SHR32_MEM({}, {}, ctx, base);", ea(dst), count_str);
+            }
         }
         break;
     case ZYDIS_MNEMONIC_SHLD:

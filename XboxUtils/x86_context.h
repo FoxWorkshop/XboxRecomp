@@ -1797,11 +1797,28 @@ inline void X86_SHR8(uint8_t& dst, const uint8_t count, X86Context& ctx)
     ctx.eflags.update_flags_shr(temp, count, dst, 1);
 }
 
+inline void X86_SHR8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig >> count;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 1);
+}
+
+
 inline void X86_SHR16(uint16_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint16_t temp = dst;
     dst >>= count;
     ctx.eflags.update_flags_shr(temp, count, dst, 2);
+}
+
+inline void X86_SHR16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig >> count;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 2);
 }
 
 inline void X86_SHR32(uint32_t& dst, const uint8_t count, X86Context& ctx)
@@ -1811,11 +1828,27 @@ inline void X86_SHR32(uint32_t& dst, const uint8_t count, X86Context& ctx)
     ctx.eflags.update_flags_shr(temp, count, dst, 4);
 }
 
+inline void X86_SHR32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig >> count;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 4);
+}
+
 inline void X86_SHL8(uint8_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint8_t temp = dst;
     dst <<= count;
     ctx.eflags.update_flags_shl(temp, count, dst, 1);
+}
+
+inline void X86_SHL8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint8_t orig = X86_LOAD_U8(addr);
+    uint8_t res = orig << count;
+    X86_STORE_U8(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 1);
 }
 
 inline void X86_SHL16(uint16_t& dst, const uint8_t count, X86Context& ctx)
@@ -1825,11 +1858,27 @@ inline void X86_SHL16(uint16_t& dst, const uint8_t count, X86Context& ctx)
     ctx.eflags.update_flags_shl(temp, count, dst, 2);
 }
 
+inline void X86_SHL16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint16_t orig = X86_LOAD_U16(addr);
+    uint16_t res = orig << count;
+    X86_STORE_U16(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 2);
+}
+
 inline void X86_SHL32(uint32_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint32_t temp = dst;
     dst <<= count;
     ctx.eflags.update_flags_shl(temp, count, dst, 4);
+}
+
+inline void X86_SHL32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
+{
+    uint32_t orig = X86_LOAD_U32(addr);
+    uint32_t res = orig << count;
+    X86_STORE_U32(addr, res);
+    ctx.eflags.update_flags_shr(orig, count, res, 4);
 }
 
 // reg destination, address type must match union type of CTX
