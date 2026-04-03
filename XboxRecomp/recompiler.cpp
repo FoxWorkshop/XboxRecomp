@@ -4546,7 +4546,7 @@ bool Recompiler::Recompile(
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
 
-                println("\tX87_MINPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
+                println("\X86_MINPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
             }
             else 
             {

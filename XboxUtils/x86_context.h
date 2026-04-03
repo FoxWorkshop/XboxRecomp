@@ -2179,19 +2179,20 @@ inline void X86_IMUL_U32(uint32_t& dst, uint32_t lhs, uint32_t rhs, X86Context& 
         | (overflow ? (X86EFlags::CF | X86EFlags::OF) : 0);
 }
 
-inline void X86_MINPS(XmmRegister& dst, __m128 src)
+inline void X86_MINPS(XmmRegister &dst, __m128 src)
 {
     dst.reg = _mm_min_ps(dst.reg, src);
 }
 
-inline void X86_MAXPS(XmmRegister& dst, __m128 src)
+inline void X86_MAXPS(XmmRegister &dst, __m128 src)
 {
     dst.reg = _mm_max_ps(dst.reg, src);
 }
 
-inline void X86_CVTSS2SI_MEM(uint32_t addr, uint32_t& dst, uint8_t* base, bool mm_cvttss_si32)
+inline void X86_CVTSS2SI_MEM(uint32_t addr, uint32_t &dst, uint8_t* base, bool mm_cvttss_si32)
 {
-    const float val = *reinterpret_cast<const float*>X86_LOAD_F32(addr);
+    float valOrigin = X86_LOAD_F32(addr);
+    const float* val = &valOrigin;
     if (mm_cvttss_si32)
         dst = static_cast<uint32_t>(static_cast<int32_t>(_mm_cvttss_si32((_mm_load_ss(val)))));
     else
