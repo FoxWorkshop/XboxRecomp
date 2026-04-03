@@ -4546,7 +4546,7 @@ bool Recompiler::Recompile(
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
 
-                println("\X86_MINPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
+                println("\tX86_MINPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
             }
             else 
             {
@@ -4568,12 +4568,12 @@ bool Recompiler::Recompile(
             if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
 
-                println("\X86_MAXPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
+                println("\tX86_MAXPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
             }
             else 
             {
                 const size_t src_xmm_idx = src.reg.value - ZYDIS_REGISTER_XMM0;
-                println("\X86_MAXPS(ctx.xmm[{}], ctx.xmm[{}].reg);", xmm_idx, src_xmm_idx);
+                println("\tX86_MAXPS(ctx.xmm[{}], ctx.xmm[{}].reg);", xmm_idx, src_xmm_idx);
             }
         }
      
