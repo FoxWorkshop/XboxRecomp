@@ -2946,25 +2946,29 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CVTTSS2SI:
+    case ZYDIS_MNEMONIC_CVTSS2SI:
         if (insn.insn.operand_count >= 2)
         {
             const auto& dst = insn.operands[0];
             const auto& src = insn.operands[1];
+            bool ismm_cvttss_si32 = (insn.insn.mnemonic == ZYDIS_MNEMONIC_CVTTSS2SI);
 
-            // CVTTSS2SI reg32, xmm/m32
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\t{} = (int32_t)_mm_cvttss_si32({});",
+                const char* intrinsic = (insn.insn.mnemonic == ZYDIS_MNEMONIC_CVTTSS2SI)
+                    ? "_mm_cvttss_si32"
+                    : "_mm_cvtss_si32";
+
+                println("\t{} = (int32_t){}({});",
                     get_x86_reg(dst.reg.value),
-                    get_x86_reg(src.reg.value, true));         // XMM reg ('true')
+                    intrinsic,
+                    get_x86_reg(src.reg.value, true));
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER &&
                 src.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                println("\tfloat tmp_{} = X86_LOAD_F32({});", base, ea(src)); // Load into a local float
-
-                println("\t{} = (int32_t)_mm_cvttss_si32(_mm_load_ss((const float*)(&tmp_{})));", get_x86_reg(dst.reg.value), base);
+                println("\tX86_CVTSS2SI_MEM({}, {}, base, {});", ea(src), get_x86_reg(dst.reg.value), ismm_cvttss_si32);
             }
         }
         break;
@@ -3197,9 +3201,7 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.st0() = sqrtl(ctx.fpu.st0());");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
-
         break;
-
     case ZYDIS_MNEMONIC_FST:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
@@ -4533,6 +4535,50 @@ bool Recompiler::Recompile(
             println("\tctx.edi.u32 += 4;");
         }
         break;
+    case ZYDIS_MNEMONIC_MINPS: 
+    {
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const size_t xmm_idx = insn.operands[0].reg.value - ZYDIS_REGISTER_XMM0;
+
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+
+                println("\tX87_MINPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
+            }
+            else 
+            {
+                const size_t src_xmm_idx = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\tX86_MINPS(ctx.xmm[{}], ctx.xmm[{}].reg);", xmm_idx, src_xmm_idx);
+            }
+        }
+     
+    }
+    break;
+    case ZYDIS_MNEMONIC_MAXPS: 
+    {
+        if (insn.insn.operand_count >= 2)
+        {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            const size_t xmm_idx = insn.operands[0].reg.value - ZYDIS_REGISTER_XMM0;
+
+            if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
+            {
+
+                println("\X86_MAXPS(ctx.xmm[{}], X86_LOAD_PS({}));", xmm_idx, ea(src));
+            }
+            else 
+            {
+                const size_t src_xmm_idx = src.reg.value - ZYDIS_REGISTER_XMM0;
+                println("\X86_MAXPS(ctx.xmm[{}], ctx.xmm[{}].reg);", xmm_idx, src_xmm_idx);
+            }
+        }
+     
+    }
+    break;
     case ZYDIS_MNEMONIC_MOVAPS:
         if (insn.insn.operand_count >= 2) {
             const auto& dst = insn.operands[0];
