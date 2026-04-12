@@ -60,6 +60,17 @@ void RecompilerConfig::Load(const std::string_view& configFilePath)
             }
         }
 
+        if (auto pushPatchArray = main["push_patch"].as_array())
+        {
+            for (auto& instr : *pushPatchArray)
+            {
+                auto& instrTable = *instr.as_table();
+                uint32_t address = *instrTable["address"].value<uint32_t>();
+                uint32_t value = *instrTable["value"].value<uint32_t>();
+                pushPatches.emplace(address, value);
+            }
+        }
+
         if (!switchTableFilePath.empty())
         {
             toml::table switchToml = toml::parse_file(directoryPath + switchTableFilePath)
@@ -136,5 +147,7 @@ void RecompilerConfig::Load(const std::string_view& configFilePath)
             midAsmHooks.emplace(*table["address"].value<uint32_t>(), std::move(midAsmHook));
         }
     }
+
+
 
 }

@@ -1999,6 +1999,16 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_PUSH:
     {
         const auto& dst = insn.operands[0];
+        std::string patchValue = "";
+        bool patchFound = false;
+        auto pushPatch = config.pushPatches.find(base);
+        if (pushPatch != config.pushPatches.end())
+        {
+            patchValue = std::to_string(pushPatch->second);
+            patchFound = true;
+            println("\t// Patched value pushed: {}", patchValue);
+        }
+
 
         //xbox kernel stuff
         if (insn.operands[0].mem.segment == ZYDIS_REGISTER_FS)
@@ -2008,28 +2018,43 @@ bool Recompiler::Recompile(
             std::string tempVar = "tmp_value_" + std::to_string(base);
             println("\{} {};", GetOperandTypeName(size), tempVar);
             HandleFsValue(size, offset, tempVar);
+   
+            if (patchFound)
+                tempVar = patchValue;
             println("\tX86_PUSH(ctx, base, {});", tempVar);
             break;
         }
 
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
+            std::string value = get_x86_reg(insn.operands[0].reg.value);
             //PUSH reg
-            println("\tX86_PUSH(ctx, base, {});", get_x86_reg(insn.operands[0].reg.value));
+            if (patchFound)
+                value = patchValue;
+            println("\tX86_PUSH(ctx, base, {});", value);
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
         {
             //PUSH imm
             ImmWrapper immWrapper{ insn.operands[0].imm }; // Wrap the immediate value
             uint32_t imm_value = static_cast<uint32_t>(insn.operands[0].imm.value.u);
+            if (patchFound)
+                imm_value = std::stoul(patchValue);
             println("\tX86_PUSH(ctx, base, 0x{:X});", imm_value);
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
-            //PUSH [mem]
-            println("\tX86_PUSH(ctx, base, X86_LOAD_{}({}));",
-                GetOperandSizeName(insn.operands[0].size),
-                ea(insn.operands[0]));
+            if (patchFound)
+            {
+                println("\tX86_PUSH(ctx, base, {});", patchValue);
+            }
+            else
+            {
+                //PUSH [mem]
+                println("\tX86_PUSH(ctx, base, X86_LOAD_{}({}));",
+                    GetOperandSizeName(insn.operands[0].size),
+                    ea(insn.operands[0]));
+            }
         }
     }
         break;
