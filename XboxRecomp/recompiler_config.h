@@ -53,6 +53,7 @@ struct RecompilerConfig
     std::unordered_map<uint32_t, uint32_t> invalidInstructions;
     std::unordered_map<uint32_t, uint32_t> bannedAddresses;
     std::unordered_map<uint32_t, RecompilerMidAsmHook> midAsmHooks;
+    std::unordered_map<uint32_t, uint32_t> pushPatches;
 
     void Load(const std::string_view& configFilePath);
 };
