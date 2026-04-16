@@ -1829,7 +1829,7 @@ bool Recompiler::Recompile(
                     out += "ctx.eflags";
                     break;
                 case 'r':
-                    out += GetJmpTableRegister(std::atoi(reg.c_str()));
+                    out += GetJmpTableRegister(std::atoi(reg.c_str() + 1));
                     break;
                 }
             }
@@ -6235,7 +6235,7 @@ bool Recompiler::Recompile(const Function& fn)
                 if (out.back() != '(')
                     out += ", ";
 
-                auto s = GetAsmHookRegister(std::atoi(reg.c_str()));
+                auto s = GetAsmHookRegister(std::atoi(reg.c_str() + 1));
                 print("{}", s);
             }
             println(");\n");
