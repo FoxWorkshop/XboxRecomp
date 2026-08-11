@@ -26,7 +26,7 @@ Virtual function calls are resolved by creating a "perfect hash table" at runtim
 
 ### Jump Tables
 
-Jump tables often have predictable assembly patterns, making them easy to detect statically. XboxAnalyse has logic for detecting jump tables (at least in Shadow The Hedgehog) but it's not perfect, a few are still missed so it's up to the user to manually extract them through ida / ghidra.
+Jump tables often have predictable assembly patterns, making them easy to detect statically. XboxAnalyse has logic for detecting jump tables (at least in Shadow the Hedgehog) but it's not perfect, a few are still missed so it's up to the user to manually extract them through ida / ghidra.
 Variations in other games may also require modifications to the detection logic. 
 
 XboxAnalyse generates a TOML file containing detected jump tables, which can be referenced in the main TOML config file. This allows the recompiler to generate real switch cases for these jump tables.
