@@ -3098,7 +3098,7 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.sw |= X87FPU::C2; // Set C2 if out of range");
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
-        println("\t\tctx.fpu.st0() = cosl(valDouble0);");
+        println("\t\tctx.fpu.st0() = {};", config.fastTrig ? "(long double)cos((double)valDouble0)" : "cosl(valDouble0)");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
@@ -3120,7 +3120,7 @@ bool Recompiler::Recompile(
         println("\tX86_FPATAN(ctx.fpu);");
         break;
     case ZYDIS_MNEMONIC_FPTAN:
-        println("\tctx.fpu.st0() = std::tanl(ctx.fpu.st0());");
+        println("\tctx.fpu.st0() = {};", config.fastTrig ? "(long double)std::tan((double)ctx.fpu.st0())" : "std::tanl(ctx.fpu.st0())");
         println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.push(1.0L);");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
@@ -3134,7 +3134,7 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t}} else {{");
 
-        println("\t\tctx.fpu.st0() = (sinl(valDouble0));");
+        println("\t\tctx.fpu.st0() = ({});", config.fastTrig ? "(long double)sin((double)valDouble0)" : "sinl(valDouble0)");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
@@ -3146,8 +3146,8 @@ bool Recompiler::Recompile(
         println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
         println("\t\tctx.fpu.push(std::numeric_limits<long double>::quiet_NaN());");
         println("\t}} else {{");
-        println("\t\tvalDouble0 = sinl(valDouble2);");
-        println("\t\tvalDouble1 = cosl(valDouble2);");
+        println("\t\tvalDouble0 = {};", config.fastTrig ? "(long double)sin((double)valDouble2)" : "sinl(valDouble2)");
+        println("\t\tvalDouble1 = {};", config.fastTrig ? "(long double)cos((double)valDouble2)" : "cosl(valDouble2)");
         println("\t\tctx.fpu.st0() = valDouble0;");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t\tctx.fpu.push(valDouble1);");
