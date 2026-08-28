@@ -1061,6 +1061,11 @@ struct X87FPU
 
     void set_exception_flags(long double result)
     {
+        // Finite input (not NaN or Inf) sets no flags below; PE (inexact)
+        // is set by callers via set_precision_flag(). Xbox titles keep all
+        // FPU exceptions masked, so the skipped ES update never applies.
+        if (result == result && result != std::numeric_limits<long double>::infinity() && result != -std::numeric_limits<long double>::infinity())
+            return;
         constexpr uint16_t FLAGS_INVALID = 0x01;   // IE bit (bit 0)
         constexpr uint16_t FLAGS_OVERFLOW = 0x08;  // OE bit (bit 3)
         constexpr uint16_t FLAGS_PRECISION = 0x20; // PE bit (bit 5)
