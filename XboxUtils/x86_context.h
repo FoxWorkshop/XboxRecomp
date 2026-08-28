@@ -35,6 +35,15 @@
 #define M_PI 3.14159265358979323846L
 #endif
 
+// X87_DOUBLE_PRECISION: speed hack. x87 stack and math run in `double`,
+// not `long double`. MSVC `long double` is already 64-bit, so this only
+// affects GCC/Clang. F80 memory ops stay 80-bit either way.
+#ifdef X87_DOUBLE_PRECISION
+using x87_float = double;
+#else
+using x87_float = long double;
+#endif
+
 #define X86_JOIN(x, y) x##y
 #define X86_XSTRINGIFY(x) #x
 #define X86_STRINGIFY(x) X86_XSTRINGIFY(x)
@@ -861,7 +870,7 @@ struct X86EFlags
 struct X87FPU
 {
     union {
-        long double st[8];  // 8-register FPU stack (ST0-ST7)
+        x87_float st[8];    // 8-register FPU stack (ST0-ST7)
         uint64_t mmx[8];    // MMX registers (MM0-MM7) - share physical space with FPU
     };
     uint16_t top = 0; //Stack pointer (0-7)
@@ -877,7 +886,7 @@ struct X87FPU
 
 
 
-    void push(long double value)
+    void push(x87_float value)
     {
         top = (top - 1) & 7;
 
@@ -898,7 +907,7 @@ struct X87FPU
         tw &= ~(3 << tag_pos);
     }
 
-    long double pop()
+    x87_float pop()
     {
         // Check for stack underflow using 2-bit tags
         int tag_pos = top * 2;
@@ -907,9 +916,9 @@ struct X87FPU
         if (current_tag == 3)
         {  // Register is already empty
             sw |= 0x41;  // Set IE and C1 for stack fault
-            return std::numeric_limits<long double>::quiet_NaN();
+            return std::numeric_limits<x87_float>::quiet_NaN();
         }
-        long double val = st[top];
+        x87_float val = st[top];
 
         // Mark register as empty (tag = 11)
         tw |= (3 << tag_pos);
@@ -930,16 +939,16 @@ struct X87FPU
         tw = (tw & ~(3 << tag_pos)) | ((0b11 & 3) << tag_pos);
     }
 
-    long double& st0() { return st[top]; }
-    long double& st1() { return st[(top + 1) & 7]; }
-    long double& st2() { return st[(top + 2) & 7]; }
-    long double& st3() { return st[(top + 3) & 7]; }
-    long double& st4() { return st[(top + 4) & 7]; }
-    long double& st5() { return st[(top + 5) & 7]; }
-    long double& st6() { return st[(top + 6) & 7]; }
-    long double& st7() { return st[(top + 7) & 7]; }
+    x87_float& st0() { return st[top]; }
+    x87_float& st1() { return st[(top + 1) & 7]; }
+    x87_float& st2() { return st[(top + 2) & 7]; }
+    x87_float& st3() { return st[(top + 3) & 7]; }
+    x87_float& st4() { return st[(top + 4) & 7]; }
+    x87_float& st5() { return st[(top + 5) & 7]; }
+    x87_float& st6() { return st[(top + 6) & 7]; }
+    x87_float& st7() { return st[(top + 7) & 7]; }
 
-    long double& getST(uint8_t index)
+    x87_float& getST(uint8_t index)
     {
         switch (index)
         {
@@ -1059,12 +1068,12 @@ struct X87FPU
         sw |= (1 << 5); // PE
     }
 
-    void set_exception_flags(long double result)
+    void set_exception_flags(x87_float result)
     {
         // Finite input (not NaN or Inf) sets no flags below; PE (inexact)
         // is set by callers via set_precision_flag(). Xbox titles keep all
         // FPU exceptions masked, so the skipped ES update never applies.
-        if (result == result && result != std::numeric_limits<long double>::infinity() && result != -std::numeric_limits<long double>::infinity())
+        if (result == result && result != std::numeric_limits<x87_float>::infinity() && result != -std::numeric_limits<x87_float>::infinity())
             return;
         constexpr uint16_t FLAGS_INVALID = 0x01;   // IE bit (bit 0)
         constexpr uint16_t FLAGS_OVERFLOW = 0x08;  // OE bit (bit 3)
@@ -1115,15 +1124,15 @@ struct X87FPU
         }
     }
 
-    long double round_to_control(long double value) const
+    x87_float round_to_control(x87_float value) const
     {
         switch ((cw >> 8) & 0x3)
         {
         case 0x0: // 24-bit single precision (float)
-            value = static_cast<long double>(static_cast<float>(value));
+            value = static_cast<x87_float>(static_cast<float>(value));
             break;
         case 0x2: // 53-bit double precision (double)
-            value = static_cast<long double>(static_cast<double>(value));
+            value = static_cast<x87_float>(static_cast<double>(value));
             break;
             // case 0x3: 64-bit extended precision (long double) - no truncation
         }
@@ -1132,18 +1141,18 @@ struct X87FPU
         return value;
     }
 
-    long double apply_rounding(long double value) const
+    x87_float apply_rounding(x87_float value) const
     {
         switch ((cw >> 10) & 0x3) {
-        case 0x0: return std::nearbyintl(value);
-        case 0x1: return std::floorl(value);
-        case 0x2: return std::ceill(value);
-        case 0x3: return std::truncl(value);
+        case 0x0: return std::nearbyint(value);
+        case 0x1: return std::floor(value);
+        case 0x2: return std::ceil(value);
+        case 0x3: return std::trunc(value);
         }
         return value;
     }
 
-    void compare_and_pop(long double rhs, int pops = 0, bool ordered = true)
+    void compare_and_pop(x87_float rhs, int pops = 0, bool ordered = true)
     {
         clear_flags();
         bool st0_nan = std::isnan(st0());
@@ -1174,7 +1183,7 @@ struct X87FPU
             pop();
     }
 
-    void compare_and_set_eflags(long double lhs, long double rhs, X86EFlags& eflags)
+    void compare_and_set_eflags(x87_float lhs, x87_float rhs, X86EFlags& eflags)
     {
         if (std::isnan(lhs) || std::isnan(rhs)) //is unordered
         {
@@ -1435,8 +1444,8 @@ inline uint64_t X86_PAVGB(uint64_t dst_val, uint64_t src_val)
 
 inline void X87_FPREM(X87FPU& fpu)
 {
-    long double dividend = fpu.st0();
-    long double divisor = fpu.st1();
+    x87_float dividend = fpu.st0();
+    x87_float divisor = fpu.st1();
     fpu.clear_flags();
 
     if (divisor == 0.0L) {
@@ -1444,8 +1453,8 @@ inline void X87_FPREM(X87FPU& fpu)
         return;
     }
 
-    long double quotient = std::trunc(dividend / divisor);
-    long double remainder = dividend - (quotient * divisor);
+    x87_float quotient = std::trunc(dividend / divisor);
+    x87_float remainder = dividend - (quotient * divisor);
     fpu.st0() = remainder;
 
     if (std::fabs(quotient) < 4.0) {
@@ -1465,7 +1474,7 @@ inline void X87_FXAM(X87FPU& fpu, int32_t top)
 {
     fpu.clear_flags();
 
-    long double v = fpu.st[top];
+    x87_float v = fpu.st[top];
 
     //Get the 2-bit tag for the current register
     int tag = (fpu.tw >> (top * 2)) & 3;
@@ -1506,8 +1515,8 @@ inline void X87_FXAM(X87FPU& fpu, int32_t top)
 inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
 {
     // FDIVP always: ST(1) = ST(1) / ST(0), then pop ST(0)
-    long double& st1 = fpu.st1();
-    long double& st0 = fpu.st0();
+    x87_float& st1 = fpu.st1();
+    x87_float& st0 = fpu.st0();
 
     if (st0 == 0.0L)
     {
@@ -1520,7 +1529,7 @@ inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
             fpu.sw |= 0x04;  // ZE flag - non-zero/0
         }
 
-        st1 = std::numeric_limits<long double>::quiet_NaN();
+        st1 = std::numeric_limits<x87_float>::quiet_NaN();
 
         // Update tag for ST(1) to "special" (tag=2)
         int tag_pos = ((fpu.top + 1) & 7) * 2;
@@ -1528,7 +1537,7 @@ inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
     }
     else
     {
-        long double result = st1 / st0;
+        x87_float result = st1 / st0;
 
         // Check for overflow/underflow
         if (std::fpclassify(result) == FP_SUBNORMAL) {
@@ -1546,10 +1555,10 @@ inline void X87_FDIVP(X87FPU& fpu, uint32_t addr)
     fpu.pop();
 }
 
-inline void X87_ISDIV_VALID(long double A, long double B, uint32_t addr)
+inline void X87_ISDIV_VALID(x87_float A, x87_float B, uint32_t addr)
 {
-    long double& st0 = A;
-    long double& st1 = B;
+    x87_float& st0 = A;
+    x87_float& st1 = B;
 
 
     if (st0 == 0.0L || st1 == 0.0L)
@@ -1558,7 +1567,7 @@ inline void X87_ISDIV_VALID(long double A, long double B, uint32_t addr)
     }
     else
     {
-        long double result = st0 / st1;
+        x87_float result = st0 / st1;
 
         // Check for overflow/underflow
         if (std::isinf(result))
@@ -1569,7 +1578,7 @@ inline void X87_ISDIV_VALID(long double A, long double B, uint32_t addr)
     }
 }
 
-inline long double X87_FDIVR(long double res, long double A, long double B, uint32_t addr)
+inline x87_float X87_FDIVR(x87_float res, x87_float A, x87_float B, uint32_t addr)
 {
     X87_ISDIV_VALID(A, B, addr);
 
@@ -1578,27 +1587,27 @@ inline long double X87_FDIVR(long double res, long double A, long double B, uint
     return res;
 }
 
-inline long double X87_FIDIV_16(long double st0, int16_t B, uint32_t addr)
+inline x87_float X87_FIDIV_16(x87_float st0, int16_t B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {
         //printf("WARNING, DIVIDE PER 0!!! (%Lf / %d) %x\n", st0, B, addr);
     }
 
-    return (st0 / (long double)B);
+    return (st0 / (x87_float)B);
 }
 
-inline long double X87_FIDIV_32(long double st0, int32_t B, uint32_t addr)
+inline x87_float X87_FIDIV_32(x87_float st0, int32_t B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {
         //printf("WARNING, DIVIDE PER 0!!! (%Lf / %d) %x\n", st0, B, addr);
     }
 
-    return (st0 / (long double)B);
+    return (st0 / (x87_float)B);
 }
 
-inline long double X87_FIDIV_REG(long double st0, long double B, uint32_t addr)
+inline x87_float X87_FIDIV_REG(x87_float st0, x87_float B, uint32_t addr)
 {
     if (st0 == 0.0L || B == 0)
     {
@@ -2416,18 +2425,18 @@ inline void X86_BSF16(uint16_t& dst, uint16_t src, X86Context& ctx)
 
 inline void X86_FPATAN(X87FPU& fpu)
 {
-    long double st1Temp = fpu.st1();
-    long double st0Temp = fpu.st0();
+    x87_float st1Temp = fpu.st1();
+    x87_float st0Temp = fpu.st0();
     fpu.set_precision_flag();
     fpu.pop();
-    fpu.st0() = atan2l(st1Temp, st0Temp);
+    fpu.st0() = std::atan2(st1Temp, st0Temp);
 }
 
 // --- FXCH helper ---
 
 inline void X86_FXCH(X87FPU& fpu, int index = 1)
 {
-    long double tmp = fpu.st0();
+    x87_float tmp = fpu.st0();
     fpu.st0() = fpu.getST(index);
     fpu.getST(index) = tmp;
 }
