@@ -3020,16 +3020,16 @@ bool Recompiler::Recompile(
             // Determine operand size and load appropriate integer type
             switch (insn.operands[0].size) {
             case 16: // FILD word ptr (16-bit)
-                println("\tctx.fpu.push(static_cast<long double>(static_cast<int16_t>(X86_LOAD_U16({}))));",
+                println("\tctx.fpu.push(static_cast<x87_float>(static_cast<int16_t>(X86_LOAD_U16({}))));",
                     ea(insn.operands[0]));
                 break;
             case 32: // FILD dword ptr (32-bit) 
             default:
-                println("\tctx.fpu.push(static_cast<long double>(static_cast<int32_t>(X86_LOAD_U32({}))));",
+                println("\tctx.fpu.push(static_cast<x87_float>(static_cast<int32_t>(X86_LOAD_U32({}))));",
                     ea(insn.operands[0]));
                 break;
             case 64: // FILD qword ptr (64-bit)
-                println("\tctx.fpu.push(static_cast<long double>(static_cast<int64_t>(X86_LOAD_U64({}))));",
+                println("\tctx.fpu.push(static_cast<x87_float>(static_cast<int64_t>(X86_LOAD_U64({}))));",
                     ea(insn.operands[0]));
                 break;
             }
@@ -3048,11 +3048,11 @@ bool Recompiler::Recompile(
         {
             if (src.size == 16)
             {
-                println("\tvalDouble0 = ctx.fpu.st0() + (long double)(int16_t)X86_LOAD_U16({});", ea(src));
+                println("\tvalDouble0 = ctx.fpu.st0() + (x87_float)(int16_t)X86_LOAD_U16({});", ea(src));
             }
             else if (src.size == 32)
             {
-                println("\tvalDouble0 = ctx.fpu.st0() + (long double)(int32_t)X86_LOAD_U32({});", ea(src));
+                println("\tvalDouble0 = ctx.fpu.st0() + (x87_float)(int32_t)X86_LOAD_U32({});", ea(src));
             }
 
             println("\tctx.fpu.st0() = valDouble0;");
@@ -3096,9 +3096,9 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.sw &= ~X87FPU::C2;");
         println("\tif (fabs(valDouble0) > 9223372036854775808.0L) {{ // 2^63");
         println("\t\tctx.fpu.sw |= X87FPU::C2; // Set C2 if out of range");
-        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<x87_float>::quiet_NaN();");
         println("\t}} else {{");
-        println("\t\tctx.fpu.st0() = cosl(valDouble0);");
+        println("\t\tctx.fpu.st0() = {};", config.fastTrig ? "(x87_float)cos((double)valDouble0)" : "std::cos(valDouble0)");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
@@ -3120,7 +3120,7 @@ bool Recompiler::Recompile(
         println("\tX86_FPATAN(ctx.fpu);");
         break;
     case ZYDIS_MNEMONIC_FPTAN:
-        println("\tctx.fpu.st0() = std::tanl(ctx.fpu.st0());");
+        println("\tctx.fpu.st0() = {};", config.fastTrig ? "(x87_float)std::tan((double)ctx.fpu.st0())" : "std::tan(ctx.fpu.st0())");
         println("\tctx.fpu.set_precision_flag();");
         println("\tctx.fpu.push(1.0L);");
         println("\tctx.fpu.set_exception_flags(ctx.fpu.st0());");
@@ -3131,10 +3131,10 @@ bool Recompiler::Recompile(
         println("\tvalDouble0 = ctx.fpu.st0();");
         println("\tif (fabs(valDouble0) > 9223372036854775808.0L) {{"); // 2^63
         println("\t\tctx.fpu.set_unordered();");
-        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<x87_float>::quiet_NaN();");
         println("\t}} else {{");
 
-        println("\t\tctx.fpu.st0() = (sinl(valDouble0));");
+        println("\t\tctx.fpu.st0() = ({});", config.fastTrig ? "(x87_float)sin((double)valDouble0)" : "std::sin(valDouble0)");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
@@ -3143,11 +3143,11 @@ bool Recompiler::Recompile(
         println("\tvalDouble2 = ctx.fpu.st0();");
         println("\tif (fabs(valDouble2) > 9223372036854775808.0L) {{");
         println("\t\tctx.fpu.set_unordered();");
-        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
-        println("\t\tctx.fpu.push(std::numeric_limits<long double>::quiet_NaN());");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<x87_float>::quiet_NaN();");
+        println("\t\tctx.fpu.push(std::numeric_limits<x87_float>::quiet_NaN());");
         println("\t}} else {{");
-        println("\t\tvalDouble0 = sinl(valDouble2);");
-        println("\t\tvalDouble1 = cosl(valDouble2);");
+        println("\t\tvalDouble0 = {};", config.fastTrig ? "(x87_float)sin((double)valDouble2)" : "std::sin(valDouble2)");
+        println("\t\tvalDouble1 = {};", config.fastTrig ? "(x87_float)cos((double)valDouble2)" : "std::cos(valDouble2)");
         println("\t\tctx.fpu.st0() = valDouble0;");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t\tctx.fpu.push(valDouble1);");
@@ -3157,9 +3157,9 @@ bool Recompiler::Recompile(
         println("\tctx.fpu.clear_flags();");
         println("\tif (ctx.fpu.st0() < 0.0) {{");
         println("\t\tctx.fpu.flag_invalid();");
-        println("\t\tctx.fpu.st0() = std::numeric_limits<long double>::quiet_NaN();");
+        println("\t\tctx.fpu.st0() = std::numeric_limits<x87_float>::quiet_NaN();");
         println("\t}} else {{");
-        println("\t\tctx.fpu.st0() = sqrtl(ctx.fpu.st0());");
+        println("\t\tctx.fpu.st0() = std::sqrt(ctx.fpu.st0());");
         println("\t\tctx.fpu.set_precision_flag();");
         println("\t}}");
         break;
@@ -3227,7 +3227,7 @@ bool Recompiler::Recompile(
         println("\t}} else {{");
         println("\t\t// Handle overflow/underflow");
         println("\t\tif (valDouble0 > 0) {{");
-        println("\t\t\tctx.fpu.st0() = (ctx.fpu.st0() >= 0) ? std::numeric_limits<long double>::infinity() : -std::numeric_limits<long double>::infinity();");
+        println("\t\t\tctx.fpu.st0() = (ctx.fpu.st0() >= 0) ? std::numeric_limits<x87_float>::infinity() : -std::numeric_limits<x87_float>::infinity();");
         println("\t\t}} else {{");
         println("\t\t\tctx.fpu.st0() = std::copysign(0.0L, ctx.fpu.st0());");
         println("\t\t}}");
@@ -3343,7 +3343,7 @@ bool Recompiler::Recompile(
                 }
                 else
                 {
-                    println("\tctx.fpu.st0() = (long double){} - ctx.fpu.st0();", get_x86_reg(src.reg.value));
+                    println("\tctx.fpu.st0() = (x87_float){} - ctx.fpu.st0();", get_x86_reg(src.reg.value));
                 }
             }
             else if (src.type == ZYDIS_OPERAND_TYPE_MEMORY)
@@ -3519,10 +3519,10 @@ bool Recompiler::Recompile(
             {
                 switch (src.size) {
                 case 16:
-                    println("\tctx.fpu.st0() = (long double)X87_FIDIV_16(ctx.fpu.st0(), (int16_t)X86_LOAD_U16({}), 0x{:X});", ea(src), base);
+                    println("\tctx.fpu.st0() = (x87_float)X87_FIDIV_16(ctx.fpu.st0(), (int16_t)X86_LOAD_U16({}), 0x{:X});", ea(src), base);
                     break;
                 case 32:
-                    println("\tctx.fpu.st0() = (long double)X87_FIDIV_32(ctx.fpu.st0(), (int32_t)X86_LOAD_U32({}), 0x{:X});", ea(src), base);
+                    println("\tctx.fpu.st0() = (x87_float)X87_FIDIV_32(ctx.fpu.st0(), (int32_t)X86_LOAD_U32({}), 0x{:X});", ea(src), base);
                     break;
                 default:
                     println("\tctx.fpu.signal_exception(FPU_EXCEPTION_INVALID);");
@@ -3531,7 +3531,7 @@ bool Recompiler::Recompile(
             }
             else if (src.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\tctx.fpu.st0() = (long double)X87_FIDIV_REG(ctx.fpu.st0(), (long double){}, 0x{:X});", get_x86_reg(src.reg.value), base);
+                println("\tctx.fpu.st0() = (x87_float)X87_FIDIV_REG(ctx.fpu.st0(), (x87_float){}, 0x{:X});", get_x86_reg(src.reg.value), base);
             }
 
         }
@@ -5974,7 +5974,7 @@ bool Recompiler::Recompile(const Function& fn)
                 {
                     if (!localvariablesTemp.valDouble[i])
                     {
-                        println("\tlong double valDouble{} = 0;\n", i);
+                        println("\tx87_float valDouble{} = 0;\n", i);
                         localvariablesTemp.valDouble[i] = true;
                     }
                 }
@@ -5983,7 +5983,7 @@ bool Recompiler::Recompile(const Function& fn)
             {
                 if (!localvariablesTemp.valDouble[0])
                 {
-                    println("\tlong double valDouble0 = 0;\n");
+                    println("\tx87_float valDouble0 = 0;\n");
                     localvariablesTemp.valDouble[0] = true;
                 }
             }

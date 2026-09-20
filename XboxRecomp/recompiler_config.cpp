@@ -25,6 +25,7 @@ void RecompilerConfig::Load(const std::string_view& configFilePath)
         //but maybe there is one super rare xbox game that didn't follow this, so just in case...
         longJmpAddress = main["longjmp_address"].value_or(0u);
         setJmpAddress = main["setjmp_address"].value_or(0u);
+        fastTrig = main["fast_trig"].value_or(false);
 
 
         if (auto functionsArray = main["functions"].as_array())

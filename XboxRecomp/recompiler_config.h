@@ -28,6 +28,8 @@ struct RecompilerConfig
     std::string outDirectoryPath;
     std::string switchTableFilePath;
     std::unordered_map<uint32_t, RecompilerSwitchTable> switchTables;
+    //Opt-in fast trig: 64-bit instead of 80-bit precision for speed.
+    bool fastTrig = false;
     bool skipLr = false;
     bool ctrAsLocalVariable = false;
     bool xerAsLocalVariable = false;
