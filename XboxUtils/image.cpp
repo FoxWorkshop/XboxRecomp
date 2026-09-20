@@ -8,7 +8,7 @@
 
 const std::string dataSegments[] =
 {
-    ".rdata", ".data", "DOLBY", ".XTILD"
+    ".rdata", ".data", "DOLBY", ".XTLID"
 };
 
 bool isDataSection(std::string s)
