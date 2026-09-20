@@ -411,7 +411,7 @@ void ProcessEntryPoint(const Image& image, const Section section, std::vector<si
         }
 
         const bool isCall = instruction.mnemonic == ZYDIS_MNEMONIC_CALL;
-        const bool isDone = instruction.mnemonic == ZYDIS_MNEMONIC_NOT || instruction.mnemonic == ZYDIS_MNEMONIC_RET;
+        const bool isDone = instruction.mnemonic == ZYDIS_MNEMONIC_INT3 || instruction.mnemonic == ZYDIS_MNEMONIC_RET;
 
         if (isDone)
         {
