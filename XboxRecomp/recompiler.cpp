@@ -2873,15 +2873,25 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_CMOVB:
         if (insn.insn.operand_count >= 2)
         {
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
             println("\tif ( (ctx.eflags.value & X86EFlags::CF)) {} = {};",
-                get_x86_reg(insn.operands[0].reg.value),
-                get_x86_reg(insn.operands[1].reg.value));
+                get_x86_reg(dst.reg.value),
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                get_x86_reg(src.reg.value) :
+                fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
         }
         break;
     case ZYDIS_MNEMONIC_CMOVNB:
         if (insn.insn.operand_count >= 2)
         {
-            println("\tif ( (ctx.eflags.value & X86EFlags::CF) == 0) {} = {};", get_x86_reg(insn.operands[0].reg.value), get_x86_reg(insn.operands[1].reg.value));
+            const auto& dst = insn.operands[0];
+            const auto& src = insn.operands[1];
+            println("\tif ( (ctx.eflags.value & X86EFlags::CF) == 0) {} = {};",
+                get_x86_reg(dst.reg.value),
+                src.type == ZYDIS_OPERAND_TYPE_REGISTER ?
+                get_x86_reg(src.reg.value) :
+                fmt::format("X86_LOAD_{}({})", GetOperandSizeName(dst.size), ea(src)));
         }
         break;
     case ZYDIS_MNEMONIC_CMOVL:
@@ -4615,7 +4625,7 @@ bool Recompiler::Recompile(
 
             if (!rhs.empty())
             {
-                println("\tX86_MUL32({}, ctx);", rhs);
+                println("\tX86_MUL{}({}, ctx);", op.size, rhs);
             }
         }
         break;

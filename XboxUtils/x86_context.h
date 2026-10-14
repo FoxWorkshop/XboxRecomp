@@ -2797,4 +2797,20 @@ inline void X86_MUL32(uint32_t rhs, X86Context& ctx)
     ctx.eflags.update_flags_mul(ctx.edx.u32 != 0);
 }
 
+
+inline void X86_MUL16(uint16_t rhs, X86Context& ctx)
+{
+    uint32_t result = static_cast<uint32_t>(ctx.eax.u16) * rhs;
+    ctx.eax.u16 = static_cast<uint16_t>(result & 0xFFFF);
+    ctx.edx.u16 = static_cast<uint16_t>(result >> 16);
+    ctx.eflags.update_flags_mul(ctx.edx.u16 != 0);
+}
+
+inline void X86_MUL8(uint8_t rhs, X86Context& ctx)
+{
+    uint16_t result = static_cast<uint16_t>(ctx.eax.u8_lo * rhs);
+    ctx.eax.u16 = result;
+    ctx.eflags.update_flags_mul((result >> 8) != 0);
+}
+
 #endif // X86_CONTEXT_H_INCLUDED
