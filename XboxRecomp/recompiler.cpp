@@ -5575,14 +5575,14 @@ bool Recompiler::Recompile(
             const auto& op = insn.operands[0];
             if (op.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\t{} = ((ctx.eflags.value & X86EFlags::SF) != "
-                    "(ctx.eflags.value & X86EFlags::OF)) ? 1 : 0;",
+                println("\t{} = (((ctx.eflags.value & X86EFlags::SF) != 0) != "
+                    "((ctx.eflags.value & X86EFlags::OF) != 0)) ? 1 : 0;",
                     get_x86_reg(op.reg.value));
             }
             else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
-                println("\tX86_STORE_U8({}, ((ctx.eflags.value & X86EFlags::SF) != "
-                    "(ctx.eflags.value & X86EFlags::OF)) ? 1 : 0);",
+                println("\tX86_STORE_U8({}, (((ctx.eflags.value & X86EFlags::SF) != 0) != "
+                    "((ctx.eflags.value & X86EFlags::OF) != 0)) ? 1 : 0);",
                     ea(op));
             }
         }
@@ -5592,7 +5592,7 @@ bool Recompiler::Recompile(
             const auto& dst = insn.operands[0];
 
             const char* cond = "((ctx.eflags.value & X86EFlags::ZF) || "
-                "((ctx.eflags.value & X86EFlags::SF) ^ (ctx.eflags.value & X86EFlags::OF)))";
+                "(((ctx.eflags.value & X86EFlags::SF) != 0) != ((ctx.eflags.value & X86EFlags::OF) != 0)))";
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                 println("\t{} = {} ? 1 : 0;", get_x86_reg(dst.reg.value), cond);
@@ -5656,12 +5656,32 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_SETNS:
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
         println("\t{} = ( (ctx.eflags.value & X86EFlags::SF) == 0);", get_x86_reg(insn.operands[0].reg.value));
+        }
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            println("\tX86_STORE_U8({}, (ctx.eflags.value & X86EFlags::SF) ? 0 : 1);", ea(insn.operands[0]));
+        }
+        break;
+    case ZYDIS_MNEMONIC_SETS:
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            println("\t{} = (ctx.eflags.value & X86EFlags::SF) ? 1 : 0;", get_x86_reg(insn.operands[0].reg.value));
+        }
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            println("\tX86_STORE_U8({}, (ctx.eflags.value & X86EFlags::SF) ? 1 : 0);", ea(insn.operands[0]));
+        }
         break;
     case ZYDIS_MNEMONIC_SETNLE:
-        println("\t{} = ((ctx.eflags.value & X86EFlags::ZF) == 0) && "
-            "((ctx.eflags.value & X86EFlags::SF) == (ctx.eflags.value & X86EFlags::OF));",
-            get_x86_reg(insn.operands[0].reg.value));
+    {
+        const char* cond = "(((ctx.eflags.value & X86EFlags::ZF) == 0) && "
+            "(((ctx.eflags.value & X86EFlags::SF) != 0) == ((ctx.eflags.value & X86EFlags::OF) != 0)))";
+        if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            println("\t{} = {} ? 1 : 0;", get_x86_reg(insn.operands[0].reg.value), cond);
+        }
+        else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+            println("\tX86_STORE_U8({}, {} ? 1 : 0);", ea(insn.operands[0]), cond);
+        }
+    }
         break;
     case ZYDIS_MNEMONIC_UCOMISS:
     {
