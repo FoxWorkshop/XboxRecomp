@@ -327,16 +327,46 @@ struct X86EFlags
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
     }
 
-    void update_flags_adc(uint32_t lhs, uint32_t rhs, uint32_t carry, uint32_t result)
+    void update_flags_logic(uint16_t result)
     {
         clear_eflags();
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x8000) ? SF : 0;
+        value |= (__builtin_popcount(result & 0xFF) % 2 == 0) ? PF : 0;
+    }
+
+    void update_flags_logic(uint8_t result)
+    {
+        clear_eflags();
+        value |= (result == 0) ? ZF : 0;
+        value |= (result & 0x80) ? SF : 0;
+        value |= (__builtin_popcount(result) % 2 == 0) ? PF : 0;
+    }
+
+    void update_flags_adc(uint32_t lhs, uint32_t rhs, uint32_t carry, uint32_t result, uint8_t operand_size = 4)
+    {
+        clear_eflags();
+        uint32_t sign_bit = operand_size * 8 - 1;
         value |= ((result < lhs) || (result == lhs && carry == 1)) ? CF : 0;
         value |= (result == 0) ? ZF : 0;
-        value |= (result & 0x80000000) ? SF : 0;
-        value |= ((((lhs ^ result) & (rhs ^ result)) >> 31) != 0) ? OF : 0;
+        value |= ((result >> sign_bit) & 1) ? SF : 0;
+        value |= ((((lhs ^ result) & (rhs ^ result)) >> sign_bit) & 1) ? OF : 0;
         uint8_t lsb = result & 0xFF;
         value |= (__builtin_popcount(lsb) % 2 == 0) ? PF : 0;
         value |= (((lhs & 0xF) + (rhs & 0xF) + carry) > 0xF) ? AF : 0;
+    }
+
+
+    void update_flags_sbb(uint32_t lhs, uint32_t rhs, uint32_t borrow, uint32_t result, uint8_t operand_size)
+    {
+        clear_eflags();
+        uint32_t sign_bit = operand_size * 8 - 1;
+        value |= ((uint64_t)lhs < (uint64_t)rhs + borrow) ? CF : 0;
+        value |= (result == 0) ? ZF : 0;
+        value |= ((result >> sign_bit) & 1) ? SF : 0;
+        value |= ((((lhs ^ rhs) & (lhs ^ result)) >> sign_bit) & 1) ? OF : 0;
+        value |= (__builtin_popcount(result & 0xFF) % 2 == 0) ? PF : 0;
+        value |= ((lhs ^ rhs ^ result) & 0x10) ? AF : 0;
     }
 
     void update_flags_add_U32(uint32_t lhs, uint32_t rhs, uint32_t result)
@@ -663,6 +693,12 @@ struct X86EFlags
     // Updates flags after SHL (Shift Left)
     void update_flags_shl(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
     {
+        // x86 masks the count to 5 bits
+        shift_count &= 0x1F;
+        
+        if (shift_count == 0)
+            return;
+
         clear_eflags();
         uint32_t bit_width = operand_size * 8;
 
@@ -693,6 +729,12 @@ struct X86EFlags
     // Updates flags after SHR (Shift Right)
     void update_flags_shr(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
     {
+        // x86 masks the count to 5 bits
+        shift_count &= 0x1F;
+
+        if (shift_count == 0)
+            return;
+
         clear_eflags();
         if (shift_count > 0)
         {
@@ -717,9 +759,10 @@ struct X86EFlags
     }
 
     void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
-        clear_eflags();
 
         if (shift_count == 0) return; // No flags affected if shift count is 0
+
+        clear_eflags();
 
         // Normalize shift count based on operand size
         uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
@@ -755,9 +798,9 @@ struct X86EFlags
 
     // Updates flags after SHRD (Shift Right Double)
     void update_flags_shrd(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
-        clear_eflags();
-
         if (shift_count == 0) return; // No flags affected if shift count is 0
+
+        clear_eflags();
 
         // Normalize shift count based on operand size
         uint32_t mask_bits = (operand_size == 16) ? 16 : 32;
@@ -771,11 +814,12 @@ struct X86EFlags
             value |= last_shifted_out ? CF : 0;
         }
 
-        // OF = MSB of original operand (only for 1-bit shifts)
+        // OF = sign bit changed (only for 1-bit shifts)
         if (shift_count == 1) {
             uint32_t sign_bit = mask_bits - 1;
             bool msb_before = (value_before >> sign_bit) & 1;
-            value |= msb_before ? OF : 0;
+            bool msb_after = (result >> sign_bit) & 1;
+            value |= (msb_before != msb_after) ? OF : 0;
         }
 
         // SF = MSB of result
@@ -793,6 +837,12 @@ struct X86EFlags
     // Updates flags after SAR (Shift Arithmetic Right)
     void update_flags_sar(uint32_t value_before, uint32_t shift_count, uint32_t result, uint8_t operand_size)
     {
+        // x86 masks the count to 5 bits
+        shift_count &= 0x1F;
+        
+        if (shift_count == 0)
+            return;
+
         uint32_t bit_width = operand_size * 8;
 
         clear_eflags();
@@ -812,44 +862,34 @@ struct X86EFlags
     }
 
     // Updates flags after ROL (Rotate Left)
-    void update_flags_rol(uint32_t value_before, uint32_t shift_count, uint32_t result)
+    void update_flags_rol(uint32_t result, uint32_t masked_count, uint8_t operand_size)
     {
-        clear_eflags();
+        if (masked_count == 0)
+            return;
 
-        //CF = Last bit rotated out (MSB before rotation)
-        if (shift_count > 0)
-        {
-            uint32_t last_rotated_out = (value_before >> (32 - (shift_count % 32))) & 1;
-            value |= (last_rotated_out) ? CF : 0;
+        uint32_t sign_bit = operand_size * 8 - 1;
+        bool new_cf = result & 1;
+        value &= ~(CF | OF);
+        value |= new_cf ? CF : 0;
+
+        if (masked_count == 1)
+            value |= (((result >> sign_bit) & 1) != new_cf) ? OF : 0;
         }
-
-        //OF = (CF ^ MSB) for 1-bit shifts (undefined otherwise)
-        if (shift_count == 1)
-        {
-            bool new_cf = (value & CF) != 0;
-            bool new_msb = (result >> 31) & 1;
-            value |= (new_cf ^ new_msb) ? OF : 0;
-        }
-    }
-
     // Updates flags after ROR (Rotate Right)
-    void update_flags_ror(uint32_t value_before, uint32_t shift_count, uint32_t result)
+    void update_flags_ror(uint32_t result, uint32_t masked_count, uint8_t operand_size)
     {
-        clear_eflags();
+        if (masked_count == 0)
+            return;
 
-        // CF = Last bit rotated out (LSB before rotation)
-        if (shift_count > 0) {
-            uint32_t last_rotated_out = (value_before >> ((shift_count % 32) - 1)) & 1;
-            value |= (last_rotated_out) ? CF : 0;
-        }
+        uint32_t sign_bit = operand_size * 8 - 1;
+        bool msb = (result >> sign_bit) & 1;
+        bool msb_minus_1 = (result >> (sign_bit - 1)) & 1;
+        value &= ~(CF | OF);
+        value |= msb ? CF : 0;
 
-        // OF = (new MSB ^ new MSB-1) for 1-bit shifts (undefined otherwise)
-        if (shift_count == 1) {
-            bool new_msb = (result >> 31) & 1;
-            bool new_msb_minus_1 = (result >> 30) & 1;
-            value |= (new_msb ^ new_msb_minus_1) ? OF : 0;
+        if (masked_count == 1)
+            value |= (msb != msb_minus_1) ? OF : 0;
         }
-    }
 
     // For STOS/MOVS instructions 
     void update_string_pointer(uint32_t& reg) {
