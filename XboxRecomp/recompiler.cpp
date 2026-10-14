@@ -2603,8 +2603,7 @@ bool Recompiler::Recompile(
                 if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER)
                 {
                     // Register operand (e.g., EAX)
-                    rhs = fmt::format("ctx.{}.u32", get_register_name(insn.operands[1].reg.value), size_suffix == "U8" ? "u8" :
-                        size_suffix == "U16" ? "u16" : "u32");
+                    rhs = get_x86_reg(insn.operands[1].reg.value);
                 }
                 else if (insn.operands[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE)
                 {
@@ -3652,7 +3651,7 @@ bool Recompiler::Recompile(
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER)
         {
-            println("\tctx.fpu.compare_and_pop(ctx.fpu.st{}(), 2);", get_st_index(insn.operands[0].reg.value));
+            println("\tctx.fpu.compare_and_pop(ctx.fpu.st1(), 2);");
         }
         break;
     case ZYDIS_MNEMONIC_FFREE:
