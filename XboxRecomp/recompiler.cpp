@@ -5363,34 +5363,15 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_CMPSB:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE)
         {
-            // esi, edi and ecx must also step on the iteration that stops the loop
-            println("\twhile (ctx.ecx.u32 > 0) {{");
-            println("\t\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
-            println("\t\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U8(val1, val2);");
-            println("\t\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
-            println("\t\tctx.ecx.u32--;");
-            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
-            println("\t}}");
+            println("\tX86_CMPSB(ctx, base, false);");
         }
         else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE)
         {
-            println("\twhile (ctx.ecx.u32 > 0) {{");
-            println("\t\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
-            println("\t\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U8(val1, val2);");
-            println("\t\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
-            println("\t\tctx.ecx.u32--;");
-            println("\t\tif (ctx.eflags.value & X86EFlags::ZF) break;");
-            println("\t}}");
+            println("\tX86_CMPSB(ctx, base, true);");
         }
         else
         {
-            println("\tuint8_t val1 = X86_LOAD_U8(ctx.esi.u32);");
-            println("\tuint8_t val2 = X86_LOAD_U8(ctx.edi.u32);");
-            println("\tctx.eflags.update_compare_flags_U8(val1, val2);");
+            println("\tctx.eflags.update_compare_flags_U8(X86_LOAD_U8(ctx.esi.u32), X86_LOAD_U8(ctx.edi.u32));");
             println("\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
             println("\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
         }
@@ -5430,33 +5411,17 @@ bool Recompiler::Recompile(
         }
         break;
     case ZYDIS_MNEMONIC_CMPSW:
-        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE) {
-            println("\twhile (ctx.ecx.u32 > 0) {{");
-            println("\t\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
-            println("\t\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U16(val1, val2);");
-            println("\t\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
-            println("\t\tctx.ecx.u32--;");
-            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
-            println("\t}}");
+        if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE)
+        {
+            println("\tX86_CMPSW(ctx, base, false);");
         }
         else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE)
         {
-            println("\twhile (ctx.ecx.u32 > 0) {{");
-            println("\t\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
-            println("\t\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U16(val1, val2);");
-            println("\t\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
-            println("\t\tctx.ecx.u32--;");
-            println("\t\tif (ctx.eflags.value & X86EFlags::ZF) break;");
-            println("\t}}");
+            println("\tX86_CMPSW(ctx, base, true);");
         }
-        else {
-            println("\tuint16_t val1 = X86_LOAD_U16(ctx.esi.u32);");
-            println("\tuint16_t val2 = X86_LOAD_U16(ctx.edi.u32);");
-            println("\tctx.eflags.update_compare_flags_U16(val1, val2);");
+        else
+        {
+            println("\tctx.eflags.update_compare_flags_U16(X86_LOAD_U16(ctx.esi.u32), X86_LOAD_U16(ctx.edi.u32));");
             println("\tctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
             println("\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;");
         }
@@ -5581,33 +5546,17 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_SCASB:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE)
         {
-            println("\twhile (ctx.ecx.u32 > 0) {{");
-            println("\t\tuint8_t val = X86_LOAD_U8(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, val);");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
-            println("\t\tctx.ecx.u32--;");
-            println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
-            println("\t}}");
+            println("\tX86_SCASB(ctx, base, false);");
         }
         else if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPNE)
         {
-            println("\t\tconst uint8_t al_val_{} = ctx.eax.u8_lo;", base);
-            println("\t\tconst bool df_{} = (ctx.eflags.value & X86EFlags::DF) != 0;", base);
-            println("\t\tuint32_t count_{} = ctx.ecx.u32;", base);
-            println("\t\twhile (count_{} > 0) {{", base);
-            println("\t\t\tctx.eflags.update_compare_flags_U8(al_val_{}, X86_LOAD_U8(ctx.edi.u32));", base);
-            println("\t\t\tctx.edi.u32 += df_{} ? -1 : 1;", base);
-            println("\t\t\tcount_{}--;", base);
-            println("\tif ((ctx.eflags.value & X86EFlags::ZF) != 0) {{");
-            println("\t\t\t\tbreak;");
-            println("\t}}");
-            println("\t\t}}");
-            println("\t\tctx.ecx.u32 = count_{};", base);
+            println("\tX86_SCASB(ctx, base, true);");
+ 
         }
-        else {
-            println("\t\tuint8_t mem_val = X86_LOAD_U8(ctx.edi.u32);");
-            println("\t\tctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, mem_val);");
-            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
+        else 
+        {
+            println("\tctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, X86_LOAD_U8(ctx.edi.u32));");
+            println("\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
         }
         break;
     case ZYDIS_MNEMONIC_SETB:

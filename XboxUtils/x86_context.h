@@ -695,7 +695,7 @@ struct X86EFlags
     {
         // x86 masks the count to 5 bits
         shift_count &= 0x1F;
-        
+
         if (shift_count == 0)
             return;
 
@@ -759,7 +759,7 @@ struct X86EFlags
     }
 
     void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
-        
+
         if (shift_count == 0) return; // No flags affected if shift count is 0
 
         clear_eflags();
@@ -839,7 +839,7 @@ struct X86EFlags
     {
         // x86 masks the count to 5 bits
         shift_count &= 0x1F;
-        
+
         if (shift_count == 0)
             return;
 
@@ -2857,6 +2857,70 @@ inline void X86_MUL8(uint8_t rhs, X86Context& ctx)
     uint16_t result = static_cast<uint16_t>(ctx.eax.u8_lo * rhs);
     ctx.eax.u16 = result;
     ctx.eflags.update_flags_mul((result >> 8) != 0);
+}
+
+inline void X86_SCASB(X86Context& ctx, uint8_t* base, bool hasRepne)
+{
+    if (hasRepne)
+    {
+        const uint8_t al_val = ctx.eax.u8_lo;
+        const bool df_val = (ctx.eflags.value & X86EFlags::DF) != 0;
+        uint32_t count = ctx.ecx.u32;
+        while (count > 0)
+        {
+            ctx.eflags.update_compare_flags_U8(al_val, X86_LOAD_U8(ctx.edi.u32));
+            ctx.edi.u32 += df_val ? -1 : 1;
+            count--;
+            if ((ctx.eflags.value & X86EFlags::ZF) != 0)
+            {
+                break;
+            }
+        }
+
+        ctx.ecx.u32 = count;
+    }
+    else
+    {
+        while (ctx.ecx.u32 > 0)
+        {
+            uint8_t val = X86_LOAD_U8(ctx.edi.u32);
+            ctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, val);
+            ctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;
+            ctx.ecx.u32--;
+
+            if (!(ctx.eflags.value & X86EFlags::ZF))
+                break;
+        }
+    }
+}
+
+
+inline void X86_CMPSB(X86Context& ctx, uint8_t* base, bool hasRepne)
+{
+    while (ctx.ecx.u32 > 0)
+    {
+        ctx.eflags.update_compare_flags_U8(X86_LOAD_U8(ctx.esi.u32), X86_LOAD_U8(ctx.edi.u32));
+        ctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;
+        ctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;
+        ctx.ecx.u32--;
+
+        if (((ctx.eflags.value & X86EFlags::ZF) != 0) == hasRepne)
+            break;
+    }
+}
+
+inline void X86_CMPSW(X86Context& ctx, uint8_t* base, bool hasRepne)
+{
+    while (ctx.ecx.u32 > 0)
+    {
+        ctx.eflags.update_compare_flags_U16(X86_LOAD_U16(ctx.esi.u32), X86_LOAD_U16(ctx.edi.u32));
+        ctx.esi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;
+        ctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -2 : 2;
+        ctx.ecx.u32--;
+
+        if (((ctx.eflags.value & X86EFlags::ZF) != 0) == hasRepne)
+            break;
+    }
 }
 
 #endif // X86_CONTEXT_H_INCLUDED
