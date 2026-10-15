@@ -5474,13 +5474,21 @@ bool Recompiler::Recompile(
 
             if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER)
             {
-                println("\t{} = X86_RCR32({}, {}, ctx.eflags);",
-                    get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_expr);
+                println("\t{} = X86_RCR_N({}, {}, ctx.eflags, {});",
+                    get_x86_reg(dst.reg.value), get_x86_reg(dst.reg.value), shift_expr, dst.size);
             }
             else if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY)
             {
+                if (dst.size == 32)
+                {
                 println("\tX86_RCR32_MEM({}, {}, ctx, base);", ea(dst), shift_expr);
             }
+                else
+                {
+                    println("\tX86_STORE_{}({}, X86_RCR_N(X86_LOAD_{}({}), {}, ctx.eflags, {}));",
+                        size_suffix, ea(dst), size_suffix, ea(dst), shift_expr, dst.size);
+                }
+        }
         }
         break;
     case ZYDIS_MNEMONIC_ROL:

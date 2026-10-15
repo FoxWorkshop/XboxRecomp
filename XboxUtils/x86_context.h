@@ -1663,38 +1663,42 @@ inline x87_float X87_FIDIV_REG(x87_float st0, x87_float B, uint32_t addr)
     return (st0 / B);
 }
 
-inline uint32_t X86_RCR32(uint32_t val, uint8_t shift, X86EFlags& eflags)
+inline uint32_t X86_RCR_N(uint32_t val, uint8_t shift, X86EFlags& eflags, uint32_t bits)
 {
-    if (shift == 0) return val;
-    shift %= 33;
+    uint32_t masked = shift & 0x1F;
+    if (masked == 0) return val;
 
-    uint8_t old_cf = (eflags.value & X86EFlags::CF) ? 1 : 0;
+    uint64_t mask = (1ULL << bits) - 1;
+    uint64_t old_cf = (eflags.value & X86EFlags::CF) ? 1 : 0;
+    uint64_t v = val & mask;
 
-    uint64_t wide = ((uint64_t)old_cf << 32) | val;
-    wide = (wide >> shift) | (wide << (33 - shift));
-    wide &= 0x1FFFFFFFFULL;
-
-    uint32_t result = static_cast<uint32_t>(wide);
-    uint8_t new_cf = (wide >> 32) & 1;
-
-    // Update CF
-    if (new_cf)
-        eflags.value |= X86EFlags::CF;
-    else
-        eflags.value &= ~X86EFlags::CF;
-
-
-    if (shift == 1)
+    // OF uses the value before the rotate
+    if (masked == 1)
     {
-        uint8_t of = ((result >> 31) & 1) ^ old_cf;
-        if (of)
+        if (((v >> (bits - 1)) & 1) != old_cf)
             eflags.value |= X86EFlags::OF;
         else
             eflags.value &= ~X86EFlags::OF;
     }
 
-    return result;
+    uint32_t count = masked % (bits + 1);
+    if (count == 0) return val;
+
+    uint64_t wide = (old_cf << bits) | v;
+    wide = ((wide >> count) | (wide << (bits + 1 - count))) & ((mask << 1) | 1);
+
+    if ((wide >> bits) & 1)
+        eflags.value |= X86EFlags::CF;
+    else
+        eflags.value &= ~X86EFlags::CF;
+
+    return static_cast<uint32_t>(wide & mask);
 }
+
+inline uint32_t X86_RCR32(uint32_t val, uint8_t shift, X86EFlags& eflags)
+    {
+    return X86_RCR_N(val, shift, eflags, 32);
+    }
 
 inline void X86_DIV8(uint32_t divisor, X86Context& ctx)
 {
@@ -2507,96 +2511,114 @@ inline void X86_RCR32_MEM(uint32_t addr, uint8_t shift, X86Context& ctx, uint8_t
 
 // --- ROL helpers ---
 
+inline uint32_t x86_rotl(uint32_t v, uint32_t n, uint32_t bits)
+{
+    uint32_t mask = (bits == 32) ? 0xFFFFFFFF : ((1u << bits) - 1);
+    n %= bits;
+    if (n == 0)
+        return v & mask;
+    return ((v << n) | ((v & mask) >> (bits - n))) & mask;
+}
+
+inline uint32_t x86_rotr(uint32_t v, uint32_t n, uint32_t bits)
+{
+    uint32_t mask = (bits == 32) ? 0xFFFFFFFF : ((1u << bits) - 1);
+    n %= bits;
+    if (n == 0)
+        return v & mask;
+    return (((v & mask) >> n) | (v << (bits - n))) & mask;
+}
+
 inline void X86_ROL32(uint32_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint32_t orig = dst;
-    dst = (orig << count) | (orig >> (32 - count));
-    ctx.eflags.update_flags_rol(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotl(dst, masked, 32);
+    ctx.eflags.update_flags_rol(dst, masked, 4);
 }
 
 inline void X86_ROL32_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint32_t orig = X86_LOAD_U32(addr);
-    uint32_t result = (orig << count) | (orig >> (32 - count));
+    uint32_t masked = count & 0x1F;
+    uint32_t result = x86_rotl(X86_LOAD_U32(addr), masked, 32);
     X86_STORE_U32(addr, result);
-    ctx.eflags.update_flags_rol(orig, count, result);
+    ctx.eflags.update_flags_rol(result, masked, 4);
 }
 
 inline void X86_ROL16(uint16_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint16_t orig = dst;
-    dst = (uint16_t)((orig << count) | (orig >> (32 - count)));
-    ctx.eflags.update_flags_rol(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotl(dst, masked, 16);
+    ctx.eflags.update_flags_rol(dst, masked, 2);
 }
 
 inline void X86_ROL16_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint16_t orig = X86_LOAD_U16(addr);
-    uint16_t result = (uint16_t)((orig << count) | (orig >> (32 - count)));
+    uint32_t masked = count & 0x1F;
+    uint16_t result = x86_rotl(X86_LOAD_U16(addr), masked, 16);
     X86_STORE_U16(addr, result);
-    ctx.eflags.update_flags_rol(orig, count, result);
+    ctx.eflags.update_flags_rol(result, masked, 2);
 }
 
 inline void X86_ROL8(uint8_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint8_t orig = dst;
-    dst = (uint8_t)((orig << count) | (orig >> (32 - count)));
-    ctx.eflags.update_flags_rol(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotl(dst, masked, 8);
+    ctx.eflags.update_flags_rol(dst, masked, 1);
 }
 
 inline void X86_ROL8_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint8_t orig = X86_LOAD_U8(addr);
-    uint8_t result = (uint8_t)((orig << count) | (orig >> (32 - count)));
+    uint32_t masked = count & 0x1F;
+    uint8_t result = x86_rotl(X86_LOAD_U8(addr), masked, 8);
     X86_STORE_U8(addr, result);
-    ctx.eflags.update_flags_rol(orig, count, result);
+    ctx.eflags.update_flags_rol(result, masked, 1);
 }
 
 // --- ROR helpers ---
 
 inline void X86_ROR32(uint32_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint32_t orig = dst;
-    dst = (orig >> count) | (orig << (32 - count));
-    ctx.eflags.update_flags_ror(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotr(dst, masked, 32);
+    ctx.eflags.update_flags_ror(dst, masked, 4);
 }
 
 inline void X86_ROR32_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint32_t orig = X86_LOAD_U32(addr);
-    uint32_t result = (orig >> count) | (orig << (32 - count));
+    uint32_t masked = count & 0x1F;
+    uint32_t result = x86_rotr(X86_LOAD_U32(addr), masked, 32);
     X86_STORE_U32(addr, result);
-    ctx.eflags.update_flags_ror(orig, count, result);
+    ctx.eflags.update_flags_ror(result, masked, 4);
 }
 
 inline void X86_ROR16(uint16_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint16_t orig = dst;
-    dst = (uint16_t)((orig >> count) | (orig << (32 - count)));
-    ctx.eflags.update_flags_ror(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotr(dst, masked, 16);
+    ctx.eflags.update_flags_ror(dst, masked, 2);
 }
 
 inline void X86_ROR16_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint16_t orig = X86_LOAD_U16(addr);
-    uint16_t result = (uint16_t)((orig >> count) | (orig << (32 - count)));
+    uint32_t masked = count & 0x1F;
+    uint16_t result = x86_rotr(X86_LOAD_U16(addr), masked, 16);
     X86_STORE_U16(addr, result);
-    ctx.eflags.update_flags_ror(orig, count, result);
+    ctx.eflags.update_flags_ror(result, masked, 2);
 }
 
 inline void X86_ROR8(uint8_t& dst, uint32_t count, X86Context& ctx)
 {
-    uint8_t orig = dst;
-    dst = (uint8_t)((orig >> count) | (orig << (32 - count)));
-    ctx.eflags.update_flags_ror(orig, count, dst);
+    uint32_t masked = count & 0x1F;
+    dst = x86_rotr(dst, masked, 8);
+    ctx.eflags.update_flags_ror(dst, masked, 1);
 }
 
 inline void X86_ROR8_MEM(uint32_t addr, uint32_t count, X86Context& ctx, uint8_t* base)
 {
-    uint8_t orig = X86_LOAD_U8(addr);
-    uint8_t result = (uint8_t)((orig >> count) | (orig << (32 - count)));
+    uint32_t masked = count & 0x1F;
+    uint8_t result = x86_rotr(X86_LOAD_U8(addr), masked, 8);
     X86_STORE_U8(addr, result);
-    ctx.eflags.update_flags_ror(orig, count, result);
+    ctx.eflags.update_flags_ror(result, masked, 1);
 }
 
 // --- SHLD helpers ---
@@ -2679,11 +2701,10 @@ inline void X86_SHRD16_MEM(uint32_t addr, uint16_t src, uint32_t raw_count, X86C
 
 inline void X86_CMPXCHG32_MEM(uint32_t addr, uint32_t src_val, X86Context& ctx, uint8_t* base)
 {
-    uint32_t expected = ctx.eax.u32;
-    bool success = X86_ATOMIC_CMPXCHG_U32(base, addr, expected, src_val);
-    if (success) {
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
+    uint32_t acc = ctx.eax.u32;
+    uint32_t expected = acc;
+    X86_ATOMIC_CMPXCHG<uint32_t>(base, addr, expected, src_val);
+    ctx.eflags.update_compare_flags_U32(acc, expected);
         ctx.eax.u32 = expected;
         ctx.eflags.value &= ~X86EFlags::ZF;
     }
