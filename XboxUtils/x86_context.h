@@ -875,6 +875,7 @@ struct X86EFlags
         if (masked_count == 1)
             value |= (((result >> sign_bit) & 1) != new_cf) ? OF : 0;
         }
+
     // Updates flags after ROR (Rotate Right)
     void update_flags_ror(uint32_t result, uint32_t masked_count, uint8_t operand_size)
     {
@@ -1225,6 +1226,8 @@ struct X87FPU
 
     void compare_and_set_eflags(x87_float lhs, x87_float rhs, X86EFlags& eflags)
     {
+        eflags.value &= ~(X86EFlags::OF | X86EFlags::SF | X86EFlags::AF);
+
         if (std::isnan(lhs) || std::isnan(rhs)) //is unordered
         {
             eflags.value |= X86EFlags::ZF | X86EFlags::PF | X86EFlags::CF;
@@ -1847,14 +1850,14 @@ inline void X86_SAR32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, u
 inline void X86_SHR8(uint8_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint8_t temp = dst;
-    dst >>= count;
+    dst >>= (count & 0x1F);
     ctx.eflags.update_flags_shr(temp, count, dst, 1);
 }
 
 inline void X86_SHR8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint8_t orig = X86_LOAD_U8(addr);
-    uint8_t res = orig >> count;
+    uint8_t res = orig >> (count & 0x1F);
     X86_STORE_U8(addr, res);
     ctx.eflags.update_flags_shr(orig, count, res, 1);
 }
@@ -1863,14 +1866,14 @@ inline void X86_SHR8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, ui
 inline void X86_SHR16(uint16_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint16_t temp = dst;
-    dst >>= count;
+    dst >>= (count & 0x1F);
     ctx.eflags.update_flags_shr(temp, count, dst, 2);
 }
 
 inline void X86_SHR16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint16_t orig = X86_LOAD_U16(addr);
-    uint16_t res = orig >> count;
+    uint16_t res = orig >> (count & 0x1F);
     X86_STORE_U16(addr, res);
     ctx.eflags.update_flags_shr(orig, count, res, 2);
 }
@@ -1878,14 +1881,14 @@ inline void X86_SHR16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, u
 inline void X86_SHR32(uint32_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint32_t temp = dst;
-    dst >>= count;
+    dst >>= (count & 0x1F);
     ctx.eflags.update_flags_shr(temp, count, dst, 4);
 }
 
 inline void X86_SHR32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint32_t orig = X86_LOAD_U32(addr);
-    uint32_t res = orig >> count;
+    uint32_t res = orig >> (count & 0x1F);
     X86_STORE_U32(addr, res);
     ctx.eflags.update_flags_shr(orig, count, res, 4);
 }
@@ -1893,46 +1896,46 @@ inline void X86_SHR32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, u
 inline void X86_SHL8(uint8_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint8_t temp = dst;
-    dst <<= count;
+    dst <<= (count & 0x1F);
     ctx.eflags.update_flags_shl(temp, count, dst, 1);
 }
 
 inline void X86_SHL8_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint8_t orig = X86_LOAD_U8(addr);
-    uint8_t res = orig << count;
+    uint8_t res = orig << (count & 0x1F);
     X86_STORE_U8(addr, res);
-    ctx.eflags.update_flags_shr(orig, count, res, 1);
+    ctx.eflags.update_flags_shl(orig, count, res, 1);
 }
 
 inline void X86_SHL16(uint16_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint16_t temp = dst;
-    dst <<= count;
+    dst <<= (count & 0x1F);
     ctx.eflags.update_flags_shl(temp, count, dst, 2);
 }
 
 inline void X86_SHL16_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint16_t orig = X86_LOAD_U16(addr);
-    uint16_t res = orig << count;
+    uint16_t res = orig << (count & 0x1F);
     X86_STORE_U16(addr, res);
-    ctx.eflags.update_flags_shr(orig, count, res, 2);
+    ctx.eflags.update_flags_shl(orig, count, res, 2);
 }
 
 inline void X86_SHL32(uint32_t& dst, const uint8_t count, X86Context& ctx)
 {
     uint32_t temp = dst;
-    dst <<= count;
+    dst <<= (count & 0x1F);
     ctx.eflags.update_flags_shl(temp, count, dst, 4);
 }
 
 inline void X86_SHL32_MEM(uint32_t addr, const uint8_t count, X86Context& ctx, uint8_t* base)
 {
     uint32_t orig = X86_LOAD_U32(addr);
-    uint32_t res = orig << count;
+    uint32_t res = orig << (count & 0x1F);
     X86_STORE_U32(addr, res);
-    ctx.eflags.update_flags_shr(orig, count, res, 4);
+    ctx.eflags.update_flags_shl(orig, count, res, 4);
 }
 
 // reg destination, address type must match union type of CTX
@@ -2134,7 +2137,7 @@ inline void X86_NEG_U32_MEM(uint32_t addr, X86Context& ctx, uint8_t* base)
     uint32_t orig = X86_LOAD_U32(addr);
     uint32_t res = -orig;
     X86_STORE_U32(addr, res);
-    ctx.eflags.update_flags_neg_U16(orig, res);
+    ctx.eflags.update_flags_neg_U32(orig, res);
 }
 
 inline void X86_NEG_U16(uint16_t &dst, X86Context& ctx)
@@ -2353,7 +2356,7 @@ inline void X86_ADC16(uint16_t& dst, uint16_t src, X86Context& ctx)
     uint16_t orig = dst;
     uint16_t result = orig + src + (uint16_t)carry;
     dst = result;
-    ctx.eflags.update_flags_adc(orig, src, carry, result);
+    ctx.eflags.update_flags_adc(orig, src, carry, result, 2);
 }
 
 inline void X86_ADC16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t* base)
@@ -2362,7 +2365,7 @@ inline void X86_ADC16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t*
     uint16_t orig = X86_LOAD_U16(addr);
     uint16_t result = orig + src + (uint16_t)carry;
     X86_STORE_U16(addr, result);
-    ctx.eflags.update_flags_adc(orig, src, carry, result);
+    ctx.eflags.update_flags_adc(orig, src, carry, result, 2);
 }
 
 inline void X86_ADC8(uint8_t& dst, uint8_t src, X86Context& ctx)
@@ -2371,7 +2374,7 @@ inline void X86_ADC8(uint8_t& dst, uint8_t src, X86Context& ctx)
     uint8_t orig = dst;
     uint8_t result = orig + src + (uint8_t)carry;
     dst = result;
-    ctx.eflags.update_flags_adc(orig, src, carry, result);
+    ctx.eflags.update_flags_adc(orig, src, carry, result, 1);
 }
 
 inline void X86_ADC8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* base)
@@ -2380,7 +2383,7 @@ inline void X86_ADC8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* b
     uint8_t orig = X86_LOAD_U8(addr);
     uint8_t result = orig + src + (uint8_t)carry;
     X86_STORE_U8(addr, result);
-    ctx.eflags.update_flags_adc(orig, src, carry, result);
+    ctx.eflags.update_flags_adc(orig, src, carry, result, 1);
 }
 
 // --- SBB helpers ---
@@ -2391,7 +2394,7 @@ inline void X86_SBB32(uint32_t& dst, uint32_t src, X86Context& ctx)
     uint32_t orig = dst;
     uint32_t result = orig - (src + carry);
     dst = result;
-    ctx.eflags.update_flags_sub_U32(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 4);
 }
 
 inline void X86_SBB32_MEM(uint32_t addr, uint32_t src, X86Context& ctx, uint8_t* base)
@@ -2400,7 +2403,7 @@ inline void X86_SBB32_MEM(uint32_t addr, uint32_t src, X86Context& ctx, uint8_t*
     uint32_t orig = X86_LOAD_U32(addr);
     uint32_t result = orig - (src + carry);
     X86_STORE_U32(addr, result);
-    ctx.eflags.update_flags_sub_U32(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 4);
 }
 
 inline void X86_SBB16(uint16_t& dst, uint16_t src, X86Context& ctx)
@@ -2409,7 +2412,7 @@ inline void X86_SBB16(uint16_t& dst, uint16_t src, X86Context& ctx)
     uint16_t orig = dst;
     uint16_t result = orig - (uint16_t)(src + carry);
     dst = result;
-    ctx.eflags.update_flags_sub_U16(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 2);
 }
 
 inline void X86_SBB16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t* base)
@@ -2418,7 +2421,7 @@ inline void X86_SBB16_MEM(uint32_t addr, uint16_t src, X86Context& ctx, uint8_t*
     uint16_t orig = X86_LOAD_U16(addr);
     uint16_t result = orig - (uint16_t)(src + carry);
     X86_STORE_U16(addr, result);
-    ctx.eflags.update_flags_sub_U16(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 2);
 }
 
 inline void X86_SBB8(uint8_t& dst, uint8_t src, X86Context& ctx)
@@ -2427,7 +2430,7 @@ inline void X86_SBB8(uint8_t& dst, uint8_t src, X86Context& ctx)
     uint8_t orig = dst;
     uint8_t result = orig - (uint8_t)(src + carry);
     dst = result;
-    ctx.eflags.update_flags_sub_U8(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 1);
 }
 
 inline void X86_SBB8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* base)
@@ -2436,7 +2439,7 @@ inline void X86_SBB8_MEM(uint32_t addr, uint8_t src, X86Context& ctx, uint8_t* b
     uint8_t orig = X86_LOAD_U8(addr);
     uint8_t result = orig - (uint8_t)(src + carry);
     X86_STORE_U8(addr, result);
-    ctx.eflags.update_flags_sub_U8(orig, src + carry, result);
+    ctx.eflags.update_flags_sbb(orig, src, carry, result, 1);
 }
 
 // --- BSF helpers ---
