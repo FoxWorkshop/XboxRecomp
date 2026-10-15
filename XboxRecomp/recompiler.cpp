@@ -3808,12 +3808,29 @@ bool Recompiler::Recompile(
         println("\tX87_FPREM(ctx.fpu);");
         println("\tctx.fpu.set_precision_flag();");
         break;
+    case ZYDIS_MNEMONIC_FPREM1:
+        println("\tX87_FPREM1(ctx.fpu);");
+        println("\tctx.fpu.set_precision_flag();");
+        break;
+    case ZYDIS_MNEMONIC_FTST: // ftst compare st0 against 0.0 without any pop
+        println("\tctx.fpu.compare_and_pop(0.0, 0);");
+        break;
     case ZYDIS_MNEMONIC_IN:
     case ZYDIS_MNEMONIC_OUT:
         break; //todo check if this is correct
     case ZYDIS_MNEMONIC_JZ:
         if (insn.insn.operand_count >= 1) {
             printConditionalBranch(false, "X86_CC_Z(ctx)", base, insn);
+        }
+        break;
+    case ZYDIS_MNEMONIC_JECXZ:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.ecx.u32 == 0)", base, insn);
+        }
+        break;
+    case ZYDIS_MNEMONIC_JCXZ:
+        if (insn.insn.operand_count >= 1) {
+            printConditionalBranch(false, "(ctx.ecx.u16 == 0)", base, insn);
         }
         break;
 
@@ -5481,14 +5498,14 @@ bool Recompiler::Recompile(
             {
                 if (dst.size == 32)
                 {
-                println("\tX86_RCR32_MEM({}, {}, ctx, base);", ea(dst), shift_expr);
-            }
+                    println("\tX86_RCR32_MEM({}, {}, ctx, base);", ea(dst), shift_expr);
+                }
                 else
                 {
                     println("\tX86_STORE_{}({}, X86_RCR_N(X86_LOAD_{}({}), {}, ctx.eflags, {}));",
                         size_suffix, ea(dst), size_suffix, ea(dst), shift_expr, dst.size);
                 }
-        }
+            }
         }
         break;
     case ZYDIS_MNEMONIC_ROL:
@@ -5698,7 +5715,7 @@ bool Recompiler::Recompile(
         break;
     case ZYDIS_MNEMONIC_SETNS:
         if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER) {
-        println("\t{} = ( (ctx.eflags.value & X86EFlags::SF) == 0);", get_x86_reg(insn.operands[0].reg.value));
+            println("\t{} = ( (ctx.eflags.value & X86EFlags::SF) == 0);", get_x86_reg(insn.operands[0].reg.value));
         }
         else if (insn.operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
             println("\tX86_STORE_U8({}, (ctx.eflags.value & X86EFlags::SF) ? 0 : 1);", ea(insn.operands[0]));
