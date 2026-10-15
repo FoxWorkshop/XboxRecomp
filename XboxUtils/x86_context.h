@@ -759,7 +759,7 @@ struct X86EFlags
     }
 
     void update_flags_shld(uint32_t value_before, uint32_t shift_count, uint32_t result, uint32_t operand_size) {
-
+        
         if (shift_count == 0) return; // No flags affected if shift count is 0
 
         clear_eflags();
@@ -874,7 +874,7 @@ struct X86EFlags
 
         if (masked_count == 1)
             value |= (((result >> sign_bit) & 1) != new_cf) ? OF : 0;
-        }
+    }
 
     // Updates flags after ROR (Rotate Right)
     void update_flags_ror(uint32_t result, uint32_t masked_count, uint8_t operand_size)
@@ -890,7 +890,7 @@ struct X86EFlags
 
         if (masked_count == 1)
             value |= (msb != msb_minus_1) ? OF : 0;
-        }
+    }
 
     // For STOS/MOVS instructions 
     void update_string_pointer(uint32_t& reg) {
@@ -1501,15 +1501,15 @@ inline void X87_FPREM_IMPL(X87FPU& fpu, bool ieee)
     fpu.st0() = remainder;
 
     int q_bits = static_cast<int>(std::fmod(std::fabs(std::round(quotient)), (x87_float)8.0));
-        if (q_bits & 1) fpu.sw |= X87FPU::C1;
-        if (q_bits & 2) fpu.sw |= X87FPU::C3;
-        if (q_bits & 4) fpu.sw |= X87FPU::C0;
-    }
+    if (q_bits & 1) fpu.sw |= X87FPU::C1;
+    if (q_bits & 2) fpu.sw |= X87FPU::C3;
+    if (q_bits & 4) fpu.sw |= X87FPU::C0;
+}
 
 inline void X87_FPREM(X87FPU& fpu)
-    {
+{
     X87_FPREM_IMPL(fpu, false);
-    }
+}
 
 inline void X87_FPREM1(X87FPU& fpu)
 {
@@ -1696,9 +1696,9 @@ inline uint32_t X86_RCR_N(uint32_t val, uint8_t shift, X86EFlags& eflags, uint32
 }
 
 inline uint32_t X86_RCR32(uint32_t val, uint8_t shift, X86EFlags& eflags)
-    {
+{
     return X86_RCR_N(val, shift, eflags, 32);
-    }
+}
 
 inline void X86_DIV8(uint32_t divisor, X86Context& ctx)
 {
@@ -2699,75 +2699,69 @@ inline void X86_SHRD16_MEM(uint32_t addr, uint16_t src, uint32_t raw_count, X86C
 
 // --- CMPXCHG helpers ---
 
+
+template<typename T>
+inline bool X86_ATOMIC_CMPXCHG(uint8_t* base, uint32_t addr, T& expected, T desired_val)
+{
+    auto* ptr = reinterpret_cast<std::atomic<T>*>(base + addr);
+    return std::atomic_compare_exchange_strong(ptr, &expected, desired_val);
+}
+
 inline void X86_CMPXCHG32_MEM(uint32_t addr, uint32_t src_val, X86Context& ctx, uint8_t* base)
 {
     uint32_t acc = ctx.eax.u32;
     uint32_t expected = acc;
     X86_ATOMIC_CMPXCHG<uint32_t>(base, addr, expected, src_val);
     ctx.eflags.update_compare_flags_U32(acc, expected);
-        ctx.eax.u32 = expected;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    ctx.eax.u32 = expected;
 }
 
 inline void X86_CMPXCHG32(uint32_t& current, uint32_t src_val, X86Context& ctx)
 {
-    uint32_t expected = ctx.eax.u32;
-    if (expected == current) {
+    uint32_t dest = current;
+    ctx.eflags.update_compare_flags_U32(ctx.eax.u32, dest);
+    if (ctx.eax.u32 == dest)
         current = src_val;
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
-        ctx.eax.u32 = current;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    else
+        ctx.eax.u32 = dest;
 }
 
 inline void X86_CMPXCHG16_MEM(uint32_t addr, uint16_t src_val, X86Context& ctx, uint8_t* base)
 {
-    uint16_t expected = ctx.eax.u16;
-    bool success = X86_ATOMIC_CMPXCHG_U32(base, addr, (uint32_t&)expected, src_val);
-    if (success) {
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
-        ctx.eax.u16 = expected;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    uint16_t acc = ctx.eax.u16;
+    uint16_t expected = acc;
+    X86_ATOMIC_CMPXCHG<uint16_t>(base, addr, expected, src_val);
+    ctx.eflags.update_compare_flags_U16(acc, expected);
+    ctx.eax.u16 = expected;
 }
 
 inline void X86_CMPXCHG16(uint16_t& current, uint16_t src_val, X86Context& ctx)
 {
-    uint16_t expected = ctx.eax.u16;
-    if (expected == current) {
+    uint16_t dest = current;
+    ctx.eflags.update_compare_flags_U16(ctx.eax.u16, dest);
+    if (ctx.eax.u16 == dest)
         current = src_val;
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
-        ctx.eax.u16 = current;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    else
+        ctx.eax.u16 = dest;
 }
 
 inline void X86_CMPXCHG8_MEM(uint32_t addr, uint8_t src_val, X86Context& ctx, uint8_t* base)
 {
-    uint8_t expected = ctx.eax.u8_lo;
-    bool success = X86_ATOMIC_CMPXCHG_U32(base, addr, (uint32_t&)expected, src_val);
-    if (success) {
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
-        ctx.eax.u8_lo = expected;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    uint8_t acc = ctx.eax.u8_lo;
+    uint8_t expected = acc;
+    X86_ATOMIC_CMPXCHG<uint8_t>(base, addr, expected, src_val);
+    ctx.eflags.update_compare_flags_U8(acc, expected);
+    ctx.eax.u8_lo = expected;
 }
 
 inline void X86_CMPXCHG8(uint8_t& current, uint8_t src_val, X86Context& ctx)
 {
-    uint8_t expected = ctx.eax.u8_lo;
-    if (expected == current) {
+    uint8_t dest = current;
+    ctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, dest);
+    if (ctx.eax.u8_lo == dest)
         current = src_val;
-        ctx.eflags.value |= X86EFlags::ZF;
-    } else {
-        ctx.eax.u8_lo = current;
-        ctx.eflags.value &= ~X86EFlags::ZF;
-    }
+    else
+        ctx.eax.u8_lo = dest;
 }
 
 // --- XADD helpers ---
