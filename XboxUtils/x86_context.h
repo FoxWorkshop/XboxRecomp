@@ -1485,7 +1485,7 @@ inline uint64_t X86_PAVGB(uint64_t dst_val, uint64_t src_val)
 
 
 
-inline void X87_FPREM(X87FPU& fpu)
+inline void X87_FPREM_IMPL(X87FPU& fpu, bool ieee)
 {
     x87_float dividend = fpu.st0();
     x87_float divisor = fpu.st1();
@@ -1496,21 +1496,24 @@ inline void X87_FPREM(X87FPU& fpu)
         return;
     }
 
-    x87_float quotient = std::trunc(dividend / divisor);
-    x87_float remainder = dividend - (quotient * divisor);
+    x87_float remainder = ieee ? std::remainder(dividend, divisor) : std::fmod(dividend, divisor);
+    x87_float quotient = (dividend - remainder) / divisor;
     fpu.st0() = remainder;
 
-    if (std::fabs(quotient) < 4.0) {
-
-        int q_bits = static_cast<int>(quotient) & 0x7;
+    int q_bits = static_cast<int>(std::fmod(std::fabs(std::round(quotient)), (x87_float)8.0));
         if (q_bits & 1) fpu.sw |= X87FPU::C1;
         if (q_bits & 2) fpu.sw |= X87FPU::C3;
         if (q_bits & 4) fpu.sw |= X87FPU::C0;
     }
-    else
+
+inline void X87_FPREM(X87FPU& fpu)
     {
-        fpu.sw |= X87FPU::C2;
+    X87_FPREM_IMPL(fpu, false);
     }
+
+inline void X87_FPREM1(X87FPU& fpu)
+{
+    X87_FPREM_IMPL(fpu, true);
 }
 
 inline void X87_FXAM(X87FPU& fpu, int32_t top)
@@ -2748,48 +2751,73 @@ inline void X86_CMPXCHG8(uint8_t& current, uint8_t src_val, X86Context& ctx)
 
 // --- XADD helpers ---
 
-inline void X86_XADD32_ATOMIC(uint32_t addr, uint32_t& src, uint8_t* base)
+inline void X86_XADD_FLAGS(uint32_t old_dest, uint32_t src, uint32_t sum, X86Context& ctx, uint32_t bits)
 {
-    src = X86_ATOMIC_XADD_U32(addr, src);
+    if (bits == 8)
+        ctx.eflags.update_flags_add_U8((uint8_t)old_dest, (uint8_t)src, (uint8_t)sum);
+    else if (bits == 16)
+        ctx.eflags.update_flags_add_U16((uint16_t)old_dest, (uint16_t)src, (uint16_t)sum);
+    else
+        ctx.eflags.update_flags_add_U32(old_dest, src, sum);
 }
 
-inline void X86_XADD32_MEM(uint32_t addr, uint32_t& src, uint8_t* base)
+inline void X86_XADD32_ATOMIC(uint32_t addr, uint32_t& src, X86Context& ctx, uint8_t* base)
+{
+    uint32_t add = src;
+    src = X86_ATOMIC_XADD_U32(addr, add);
+    X86_XADD_FLAGS(src, add, src + add, ctx, 32);
+}
+
+inline void X86_XADD32_MEM(uint32_t addr, uint32_t& src, X86Context& ctx, uint8_t* base)
 {
     uint32_t tmp = *reinterpret_cast<volatile uint32_t*>(base + addr);
-    *reinterpret_cast<volatile uint32_t*>(base + addr) += src;
+    uint32_t sum = tmp + src;
+    *reinterpret_cast<volatile uint32_t*>(base + addr) = sum;
+    X86_XADD_FLAGS(tmp, src, sum, ctx, 32);
     src = tmp;
 }
 
-inline void X86_XADD16_ATOMIC(uint32_t addr, uint16_t& src, uint8_t* base)
+inline void X86_XADD16_ATOMIC(uint32_t addr, uint16_t& src, X86Context& ctx, uint8_t* base)
 {
-    src = X86_ATOMIC_XADD_U16(addr, src);
+    uint16_t add = src;
+    src = X86_ATOMIC_XADD_U16(addr, add);
+    X86_XADD_FLAGS(src, add, (uint16_t)(src + add), ctx, 16);
 }
 
-inline void X86_XADD16_MEM(uint32_t addr, uint16_t& src, uint8_t* base)
+inline void X86_XADD16_MEM(uint32_t addr, uint16_t& src, X86Context& ctx, uint8_t* base)
 {
     uint16_t tmp = *reinterpret_cast<volatile uint16_t*>(base + addr);
-    *reinterpret_cast<volatile uint16_t*>(base + addr) += src;
+    uint16_t sum = tmp + src;
+    *reinterpret_cast<volatile uint16_t*>(base + addr) = sum;
+    X86_XADD_FLAGS(tmp, src, sum, ctx, 16);
     src = tmp;
 }
 
-inline void X86_XADD8_ATOMIC(uint32_t addr, uint8_t& src, uint8_t* base)
+inline void X86_XADD8_ATOMIC(uint32_t addr, uint8_t& src, X86Context& ctx, uint8_t* base)
 {
-    src = X86_ATOMIC_XADD_U8(addr, src);
+    uint8_t add = src;
+    src = X86_ATOMIC_XADD_U8(addr, add);
+    X86_XADD_FLAGS(src, add, (uint8_t)(src + add), ctx, 8);
 }
 
-inline void X86_XADD8_MEM(uint32_t addr, uint8_t& src, uint8_t* base)
+inline void X86_XADD8_MEM(uint32_t addr, uint8_t& src, X86Context& ctx, uint8_t* base)
 {
     uint8_t tmp = *reinterpret_cast<volatile uint8_t*>(base + addr);
-    *reinterpret_cast<volatile uint8_t*>(base + addr) += src;
+    uint8_t sum = tmp + src;
+    *reinterpret_cast<volatile uint8_t*>(base + addr) = sum;
+    X86_XADD_FLAGS(tmp, src, sum, ctx, 8);
     src = tmp;
 }
 
 template<typename T>
-inline void X86_XADD_REG(T& dst, T& src)
+inline void X86_XADD_REG(T& dst, T& src, X86Context& ctx)
 {
-    T tmp = dst;
-    dst += src;
-    src = tmp;
+    T old_dst = dst;
+    T add = src;
+    T sum = (T)(old_dst + add);
+    src = old_dst;
+    dst = sum;
+    X86_XADD_FLAGS(old_dst, add, sum, ctx, sizeof(T) * 8);
 }
 
 inline void X86_MUL32(uint32_t rhs, X86Context& ctx)

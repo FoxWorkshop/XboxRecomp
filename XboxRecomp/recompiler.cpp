@@ -5149,16 +5149,16 @@ bool Recompiler::Recompile(
             {
                 if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_LOCK)
                 {
-                    println("\tX86_XADD{}_ATOMIC({}, {}, base);", src.size, ea(dst), get_x86_reg(src.reg.value));
+                    println("\tX86_XADD{}_ATOMIC({}, {}, ctx, base);", src.size, ea(dst), get_x86_reg(src.reg.value));
                 }
                 else
                 {
-                    println("\tX86_XADD{}_MEM({}, {}, base);", src.size, ea(dst), get_x86_reg(src.reg.value));
+                    println("\tX86_XADD{}_MEM({}, {}, ctx, base);", src.size, ea(dst), get_x86_reg(src.reg.value));
                 }
             }
             else
             {
-                println("\tX86_XADD_REG({}, {});", get_x86_reg(dst.reg.value), get_x86_reg(src.reg.value));
+                println("\tX86_XADD_REG({}, {}, ctx);", get_x86_reg(dst.reg.value), get_x86_reg(src.reg.value));
             }
         }
         break;
