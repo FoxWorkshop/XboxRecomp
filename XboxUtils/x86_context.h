@@ -2665,7 +2665,7 @@ inline void X86_SHRD32(uint32_t& dst, uint32_t src, uint32_t raw_count, X86Conte
 {
     uint32_t count = raw_count & 0x1F;
     uint32_t orig = dst;
-    uint32_t result = (orig >> count) | (src << (32 - count));
+    uint32_t result = count ? ((orig >> count) | (src << (32 - count))) : orig;
     dst = result;
     ctx.eflags.update_flags_shrd(orig, count, result, 32);
 }
@@ -2674,7 +2674,7 @@ inline void X86_SHRD32_MEM(uint32_t addr, uint32_t src, uint32_t raw_count, X86C
 {
     uint32_t count = raw_count & 0x1F;
     uint32_t orig = X86_LOAD_U32(addr);
-    uint32_t result = (orig >> count) | (src << (32 - count));
+    uint32_t result = count ? ((orig >> count) | (src << (32 - count))) : orig;
     X86_STORE_U32(addr, result);
     ctx.eflags.update_flags_shrd(orig, count, result, 32);
 }

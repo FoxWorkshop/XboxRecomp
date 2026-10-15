@@ -5564,9 +5564,11 @@ bool Recompiler::Recompile(
     case ZYDIS_MNEMONIC_SCASB:
         if (insn.insn.attributes & ZYDIS_ATTRIB_HAS_REPE)
         {
-            println("\tfor (; ctx.ecx.u32 > 0; ctx.ecx.u32--, ctx.edi.u32 += 1) {{");
+            println("\twhile (ctx.ecx.u32 > 0) {{");
             println("\t\tuint8_t val = X86_LOAD_U8(ctx.edi.u32);");
             println("\t\tctx.eflags.update_compare_flags_U8(ctx.eax.u8_lo, val);");
+            println("\t\tctx.edi.u32 += (ctx.eflags.value & X86EFlags::DF) ? -1 : 1;");
+            println("\t\tctx.ecx.u32--;");
             println("\t\tif (!(ctx.eflags.value & X86EFlags::ZF)) break;");
             println("\t}}");
         }
