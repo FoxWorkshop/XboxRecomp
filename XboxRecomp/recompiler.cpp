@@ -5872,7 +5872,7 @@ bool Recompiler::Recompile(const Function& fn)
             {
                 size_t targetAddr = addr + insn.length + operands[0].imm.value.s;
 
-                if (targetAddr > fn.base && targetAddr < fn.base + fn.size)
+                if (targetAddr >= fn.base && targetAddr < fn.base + fn.size)
                     labels.emplace(targetAddr);
             }
         }
